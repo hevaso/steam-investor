@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+    <meta charset="UTF-8">
+    <title>Steam Market Graphics</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .chart-container {
+            width: 100%;
+            max-width: 950px;
+            margin: 20px auto;
+            padding: 20px;
+            background: #141419;
+            border-radius: 12px;
+            font-family: sans-serif;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        canvas { width: 100% !important; height: 400px !important; }
+    </style>
+</head>
+<body>
+
+<div class="chart-container">
+    <canvas id="goMarketChart"></canvas>
+</div>
+
+<script>
+fetch('http://localhost:8080/api/market-data')
+    .then(response => response.json())
+    .then(data => {
+        const labels = [];
+        const realData = [];
+        const predictData = [];
+
+        data.forEach((point, index) => {
+            labels.push(point.timestamp);
+            
+            if (!point.is_predict) {
+                realData.push(point.price);
+                predictData.push(null);
+            } else {
+                realData.push(null);
+                predictData.push(point.price);
+                
+                if (index > 0 && !data[index-1].is_predict) {
+                    predictData[index-1] = data[index-1].price;
+                }
+            }
+        });
+
+        const ctx = document.getElementById('goMarketChart').getContext('2d');
+        new Chart(ctx, {ind
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Реална цена (€)',
+                        data: realData,
+                        borderColor: '#00e5ff',
+                        borderWidth: 3,
+                        pointRadius: 0,
+                        fill: false
+                    },
+                    {
+                        label: 'Алгоритъм Предикт (€)',
+                        data: predictData,
+                        borderColor: '#ff3d00',
+                        borderDash: [6, 4],
+                        borderWidth: 3,
+                        pointRadius: 0,
+                        fill: false
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: '#888' } },
+                    y: { grid: { color: '#222' }, ticks: { color: '#888' } }
+                }
+            }
+        });
+    })
+    .catch(err => console.error(err));
+</script>
+
+</body>
+</html>
