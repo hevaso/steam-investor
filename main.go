@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// Структури за данни
 type ChartPoint struct {
 	Price     float64 `json:"price"`
 	IsPredict bool    `json:"is_predict"`
@@ -28,6 +29,7 @@ var (
 	mu            sync.Mutex
 )
 
+// CORS настройки за връзка с браузъра
 func setupCORS(w *http.ResponseWriter, r *http.Request) bool {
 	(*w).Header().Set("Access-Control-Allow-Origin", "*")
 	(*w).Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -42,6 +44,7 @@ func setupCORS(w *http.ResponseWriter, r *http.Request) bool {
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
+	// Начална генерация
 	for i := 0; i < 30; i++ {
 		simulateMarketMatch()
 	}
@@ -51,7 +54,7 @@ func main() {
 	http.HandleFunc("/api/market-data", handleMarketData)
 	http.HandleFunc("/api/tick", handleTick)
 
-	fmt.Println("[ENGINE] Истински пазарен двигател (RSI + Volume) на порт :8081")
+	fmt.Println("[ENGINE] Пазарен двигател (RSI + Volume) работи на порт :8081")
 	log.Fatal(http.ListenAndServe(":8081", nil))
 }
 
