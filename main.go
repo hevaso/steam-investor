@@ -3,138 +3,159 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"math"
+	"log"
 	"math/rand"
 	"net/http"
+	"sync"
 	"time"
 )
 
 type ChartPoint struct {
-	Price float64 `json:"price"`
-	Ema   float64 `json:"ema"`
+	Price     float64 `json:"price"`
+	IsPredict bool    `json:"is_predict"`
 }
 
-type MarketTickResponse struct {
+type TickResponse struct {
 	Price  float64 `json:"price"`
-	Ema    float64 `json:"ema"`
 	Signal string  `json:"signal"`
 }
 
-var rawHistory = []float64{
-	1.338, 1.341, 1.336, 1.320, 1.396, 1.444, 1.484, 1.390, 1.372, 1.394,
-}
+var (
+	priceHistory  []float64
+	chartData     []ChartPoint
+	currentPrice  float64 = 2.95
+	currentSignal string  = "HOLD"
+	mu            sync.Mutex
+)
 
-var currentAssetPrices = map[string][]ChartPoint{
-	"dead-hand": {},
-	"valkyrie":  {},
-}
-
-func calculateInitialEma(prices []float64) []ChartPoint {
-	var points []ChartPoint
-	if len(prices) == 0 {
-		return points
-	}
-	ema := prices[0]
-	points = append(points, ChartPoint{Price: prices[0], Ema: ema})
-	alpha := 2.0 / (20.0 + 1.0)
-	for i := 1; i < len(prices); i++ {
-		ema = (prices[i] * alpha) + (ema * (1.0 - alpha))
-		points = append(points, ChartPoint{Price: prices[i], Ema: ema})
-	}
-	return points
-}
-
-func enableCORS(w *http.ResponseWriter) {
+func setupCORS(w *http.ResponseWriter, r *http.Request) bool {
 	(*w).Header().Set("Access-Control-Allow-Origin", "*")
 	(*w).Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	(*w).Header().Set("Access-Control-Allow-Headers", "Content-Type")
-	(*w).Header().Set("Content-Type", "application/json")
-}
-
-func tickHandler(w http.ResponseWriter, r *http.Request) {
-	enableCORS(&w)
 	if r.Method == "OPTIONS" {
-		return
+		(*w).WriteHeader(http.StatusOK)
+		return true
 	}
-
-	asset := r.URL.Query().Get("asset")
-	if asset == "" {
-		asset = "dead-hand"
-	}
-
-	points := currentAssetPrices[asset]
-	if len(points) == 0 {
-		multiplier := 1.0
-		if asset == "valkyrie" {
-			multiplier = 5.0
-		}
-		var initialPrices []float64
-		for _, p := range rawHistory {
-			initialPrices = append(initialPrices, p*multiplier)
-		}
-		points = calculateInitialEma(initialPrices)
-		currentAssetPrices[asset] = points
-	}
-
-	lastPoint := points[len(points)-1]
-	nextPrice := lastPoint.Price
-
-	change := (rand.Float64() - 0.49) * 0.05
-	if asset == "valkyrie" {
-		change = (rand.Float64() - 0.49) * 0.25
-	}
-	nextPrice += change
-	if nextPrice < 0.5 {
-		nextPrice = 0.5
-	}
-
-	alpha := 2.0 / (20.0 + 1.0)
-	nextEma := (nextPrice * alpha) + (lastPoint.Ema * (1.0 - alpha))
-
-	nextPrice = math.Round(nextPrice*100) / 100
-	nextEma = math.Round(nextEma*100) / 100
-
-	points = append(points, ChartPoint{Price: nextPrice, Ema: nextEma})
-	if len(points) > 50 {
-		points = points[1:]
-	}
-	currentAssetPrices[asset] = points
-
-	signal := "WAIT"
-	if nextPrice > nextEma {
-		signal = "BUY"
-	} else if nextPrice < nextEma {
-		signal = "SELL"
-	}
-
-	response := MarketTickResponse{
-		Price:  nextPrice,
-		Ema:    nextEma,
-		Signal: signal,
-	}
-
-	json.NewEncoder(w).Encode(response)
-}
-
-func historyHandler(w http.ResponseWriter, r *http.Request) {
-	enableCORS(&w)
-	if r.Method == "OPTIONS" {
-		return
-	}
-
-	asset := r.URL.Query().Get("asset")
-	if asset == "" {
-		asset = "dead-hand"
-	}
-
-	points := currentAssetPrices[asset]
-	json.NewEncoder(w).Encode(points)
+	return false
 }
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
-	http.HandleFunc("/api/tick", tickHandler)
-	http.HandleFunc("/api/history", historyHandler)
-	fmt.Println("Engine successfully running on port 8080...")
-	http.ListenAndServe("127.0.0.1:8080", nil)
+
+	for i := 0; i < 30; i++ {
+		simulateMarketMatch()
+	}
+
+	go runAdvancedMarket()
+
+	http.HandleFunc("/api/market-data", handleMarketData)
+	http.HandleFunc("/api/tick", handleTick)
+
+	fmt.Println("[ENGINE] Истински пазарен двигател (RSI + Volume) на порт :8081")
+	log.Fatal(http.ListenAndServe(":8081", nil))
+}
+
+func runAdvancedMarket() {
+	ticker := time.NewTicker(1000 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		<-ticker.C
+		mu.Lock()
+
+		simulateMarketMatch()
+		rsi := calculateRSI(14)
+
+		if rsi <= 30 {
+			currentSignal = "BUY (OVERSOLD)"
+		} else if rsi >= 70 {
+			currentSignal = "SELL (OVERBOUGHT)"
+		} else {
+			if len(priceHistory) >= 5 {
+				var sum float64
+				for _, p := range priceHistory[len(priceHistory)-5:] {
+					sum += p
+				}
+				sma5 := sum / 5.0
+				if currentPrice < sma5 {
+					currentSignal = "BUY"
+				} else {
+					currentSignal = "SELL"
+				}
+			}
+		}
+
+		chartData = []ChartPoint{}
+		for _, p := range priceHistory {
+			chartData = append(chartData, ChartPoint{Price: p, IsPredict: false})
+		}
+
+		predictedPrice := currentPrice
+		if rsi <= 30 {
+			predictedPrice += 0.15
+		} else if rsi >= 70 {
+			predictedPrice -= 0.15
+		} else {
+			predictedPrice += (rand.Float64() * 0.06) - 0.03
+		}
+
+		chartData = append(chartData, ChartPoint{Price: predictedPrice, IsPredict: true})
+
+		if len(priceHistory) > 40 {
+			priceHistory = priceHistory[1:]
+		}
+
+		mu.Unlock()
+	}
+}
+
+func simulateMarketMatch() {
+	buyersVolume := rand.Intn(100) + 20
+	sellersVolume := rand.Intn(100) + 20
+
+	if buyersVolume > sellersVolume+15 {
+		currentPrice += rand.Float64() * 0.08
+	} else if sellersVolume > buyersVolume+15 {
+		currentPrice -= rand.Float64() * 0.08
+	} else {
+		currentPrice += (rand.Float64() * 0.02) - 0.01
+	}
+
+	if currentPrice < 0.10 {
+		currentPrice = 0.10
+	}
+	priceHistory = append(priceHistory, currentPrice)
+}
+
+func calculateRSI(period int) float64 {
+	if len(priceHistory) < period+1 {
+		return 50.0
+	}
+	var gains, losses float64
+	for i := len(priceHistory) - period; i < len(priceHistory); i++ {
+		change := priceHistory[i] - priceHistory[i-1]
+		if change > 0 { gains += change } else { losses -= change }
+	}
+	if losses == 0 { return 100.0 }
+	rs := gains / losses
+	return 100.0 - (100.0 / (1.0 + rs))
+}
+
+func handleTick(w http.ResponseWriter, r *http.Request) {
+	if setupCORS(&w, r) { return }
+	w.Header().Set("Content-Type", "application/json")
+	mu.Lock()
+	resp := TickResponse{Price: currentPrice, Signal: currentSignal}
+	mu.Unlock()
+	json.NewEncoder(w).Encode(resp)
+}
+
+func handleMarketData(w http.ResponseWriter, r *http.Request) {
+	if setupCORS(&w, r) { return }
+	w.Header().Set("Content-Type", "application/json")
+	mu.Lock()
+	data := make([]ChartPoint, len(chartData))
+	copy(data, chartData)
+	mu.Unlock()
+	json.NewEncoder(w).Encode(data)
 }
