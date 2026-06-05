@@ -2,89 +2,76 @@
 <html lang="bg">
 <head>
     <meta charset="UTF-8">
-    <title>Steam Market Graphics</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Steam Market Simulator</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        .chart-container {
-            width: 100%;
-            max-width: 950px;
-            margin: 20px auto;
-            padding: 20px;
-            background: #141419;
-            border-radius: 12px;
-            font-family: sans-serif;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-        }
-        canvas { width: 100% !important; height: 400px !important; }
+        body { background-color: #06090c; color: white; font-family: sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .container { width: 900px; background: #0d1216; padding: 20px; border-radius: 12px; border: 1px solid #172026; }
+        .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
+        .chart-box { width: 100%; height: 400px; background: #070a0d; padding: 10px; border-radius: 8px; }
     </style>
 </head>
 <body>
 
-<div class="chart-container">
-    <canvas id="goMarketChart"></canvas>
+<div class="container">
+    <div class="header">
+        <h1>Dead Hand Market Terminal</h1>
+        <div id="status" style="color: #00ff88; font-weight: bold;">Свързване...</div>
+    </div>
+    <div class="chart-box">
+        <canvas id="goMarketChart"></canvas>
+    </div>
 </div>
 
 <script>
-fetch('http://localhost:8080/api/market-data')
-    .then(response => response.json())
-    .then(data => {
-        const labels = [];
-        const realData = [];
-        const predictData = [];
+    let chartInstance = null;
 
-        data.forEach((point, index) => {
-            labels.push(point.timestamp);
+    async function fetchMarketData() {
+        try {
+            // Връзка с Go сървъра на порт 8081
+            let [tickRes, chartRes] = await Promise.all([
+                fetch('http://127.0.0.1:8081/api/tick'),
+                fetch('http://127.0.0.1:8081/api/market-data')
+            ]);
             
-            if (!point.is_predict) {
-                realData.push(point.price);
-                predictData.push(null);
-            } else {
-                realData.push(null);
-                predictData.push(point.price);
-                
-                if (index > 0 && !data[index-1].is_predict) {
-                    predictData[index-1] = data[index-1].price;
-                }
-            }
-        });
+            let tick = await tickRes.json();
+            let data = await chartRes.json();
+            
+            document.getElementById('status').innerText = `Цена: ${tick.price.toFixed(2)} EUR | Сигнал: ${tick.signal}`;
+            renderChart(data);
+        } catch (e) {
+            document.getElementById('status').innerText = "Грешка: Сървърът не работи!";
+        }
+    }
 
-        const ctx = document.getElementById('goMarketChart').getContext('2d');
-        new Chart(ctx, {ind
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: [
-                    {
-                        label: 'Реална цена (€)',
-                        data: realData,
-                        borderColor: '#00e5ff',
-                        borderWidth: 3,
-                        pointRadius: 0,
-                        fill: false
-                    },
-                    {
-                        label: 'Алгоритъм Предикт (€)',
-                        data: predictData,
-                        borderColor: '#ff3d00',
-                        borderDash: [6, 4],
-                        borderWidth: 3,
-                        pointRadius: 0,
-                        fill: false
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: { grid: { display: false }, ticks: { color: '#888' } },
-                    y: { grid: { color: '#222' }, ticks: { color: '#888' } }
-                }
-            }
-        });
-    })
-    .catch(err => console.error(err));
+    function renderChart(dataArray) {
+        const labels = dataArray.map((_, i) => i);
+        const real = dataArray.map(p => p.is_predict ? null : p.price);
+        const pred = dataArray.map(p => p.is_predict ? p.price : null);
+
+        if (!chartInstance) {
+            const ctx = document.getElementById('goMarketChart').getContext('2d');
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { label: 'Реална цена', data: real, borderColor: '#00e5ff', tension: 0.1 },
+                        { label: 'Алгоритъм Предикт', data: pred, borderColor: '#ff3d00', borderDash: [5, 5], tension: 0.1 }
+                    ]
+                },
+                options: { responsive: true, maintainAspectRatio: false, animation: false }
+            });
+        } else {
+            chartInstance.data.labels = labels;
+            chartInstance.data.datasets[0].data = real;
+            chartInstance.data.datasets[1].data = pred;
+            chartInstance.update();
+        }
+    }
+
+    setInterval(fetchMarketData, 1000);
 </script>
-
 </body>
 </html>
