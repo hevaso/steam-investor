@@ -240,7 +240,6 @@
             font-weight: bold;
         }
 
-        /* --- ИНДИКАТОРИ (нова секция) --- */
         .indicator-strip {
             display: grid;
             grid-template-columns: repeat(5, 1fr);
@@ -350,8 +349,8 @@
                 <div class="conn-dot" id="conn-status" style="color:#627893;">● ИЗЧАКВАНЕ</div>
                 <div class="speed-control">
                     <span>Скорост:</span>
-                    <input type="range" id="speed-slider" min="100" max="2000" value="500" step="100">
-                    <span id="speed-val">500ms</span>
+                    <input type="range" id="speed-slider" min="3000" max="10000" value="5000" step="500">
+                    <span id="speed-val">5000ms</span>
                 </div>
                 <button class="reset-btn" onclick="resetGame()">Рестарт прогрес</button>
                 <div class="wallet-hub" id="wallet-display">БАЛАНС: 50.00 EUR</div>
@@ -371,7 +370,7 @@
                     <div style="font-size: 1.1vw; font-weight: 600;" id="chart-title">📊 Графика: Sealed Dead Hand
                         Terminal</div>
                     <div style="display: flex; gap: 1vw; font-size: 0.8vw; font-weight: bold;">
-                        <span style="color: #00e5ff;">● Реална цена</span>
+                        <span style="color: #00e5ff;" id="legend-real">● Реална цена</span>
                         <span style="color: #ff3d00;">● Прогноза (несигурна)</span>
                     </div>
                 </div>
@@ -388,7 +387,6 @@
             </div>
         </div>
 
-        <!-- НОВА СЕКЦИЯ: Индикатори в реално време -->
         <section class="indicator-strip">
             <div class="ind-card">
                 <div class="ind-name">RSI (14)</div>
@@ -439,16 +437,10 @@
             </div>
         </section>
 
-        <div class="disclaimer">
-            ⚠️ <b>Това е учебен симулатор, не реални Steam цени.</b> Индикаторите (RSI, MACD, Bollinger) описват какво
-            вече се е случило — те НЕ предсказват бъдещето със 100% сигурност. Никой инструмент не може. Оранжевата зона
-            на графиката показва точно това: бъдещето е „конус“ от възможности, който се разширява, не една линия.
-            Истинската търговия носи риск от загуба (такса 13–15%, спадащи цени, ликвидност).
-        </div>
+        <div class="disclaimer" id="disclaimer">Свързване с двигателя…</div>
     </div>
 
     <script>
-        // ── Състояние ────────────────────────────────────────────────
         let marketPrice = 0.0;
         let chartInstance = null;
         let isConnected = false;
@@ -459,13 +451,11 @@
 
         const API = 'http://127.0.0.1:8080';
 
-        // ── Поллинг на живо ──────────────────────────────────────────
         async function fetchAlgorithmTick() {
             try {
                 let response = await fetch(`${API}/api/tick?asset=dead-hand`);
                 if (!response.ok) throw new Error(`tick ${response.status}`);
                 let data = await response.json();
-
                 marketPrice = parseFloat(data.price || 0);
                 setConnected(true);
                 updateItemCardUI(marketPrice, data.signal || "HOLD");
@@ -489,20 +479,15 @@
                 let data = await response.json();
                 if (!Array.isArray(data) || data.length === 0) throw new Error("празен масив");
                 renderChart(data);
-            } catch (err) {
-                // Тихо: tick хендлърът вече показва статуса на връзката.
-            }
+            } catch (err) { }
         }
 
-        // ── Рисуване на графиката (реална линия + прогноза + конус) ──
         function renderChart(dataArray) {
             const labels = [], realData = [], centerData = [], upperData = [], lowerData = [];
-
             dataArray.forEach((point, index) => {
                 labels.push(index);
                 const price = parseFloat(point.price || 0);
                 const isPredict = point.is_predict === true;
-
                 if (!isPredict) {
                     realData.push(price);
                     centerData.push(null);
@@ -513,8 +498,6 @@
                     centerData.push(price);
                     upperData.push(point.upper != null ? parseFloat(point.upper) : price);
                     lowerData.push(point.lower != null ? parseFloat(point.lower) : price);
-
-                    // Свързваме плътната и прекъснатата линия в точката на прехода
                     const prev = dataArray[index - 1];
                     if (index > 0 && prev && prev.is_predict !== true) {
                         const pv = parseFloat(prev.price || 0);
@@ -553,8 +536,7 @@
             }
         }
 
-        // ── Интервал / скорост ───────────────────────────────────────
-        let intervalSpeed = 500;
+        let intervalSpeed = 5000;
         let marketInterval = setInterval(fetchAlgorithmTick, intervalSpeed);
         document.getElementById('speed-slider').addEventListener('input', (e) => {
             intervalSpeed = parseInt(e.target.value);
@@ -563,7 +545,10 @@
             marketInterval = setInterval(fetchAlgorithmTick, intervalSpeed);
         });
 
-        // ── Търговия ─────────────────────────────────────────────────
+        async function notifyTrade(action) {
+            try { await fetch(`${API}/api/trade?action=${action}`, { method: 'POST' }); } catch (e) { }
+        }
+
         function buyItem(id) {
             if (!isConnected) return;
             if (wallet >= marketPrice) {
@@ -571,6 +556,7 @@
                 inventory[id] = (inventory[id] || 0) + 1;
                 logEvent(`Купихте за ${marketPrice.toFixed(2)} EUR`);
                 saveAndRefresh();
+                notifyTrade('buy');
             } else {
                 logEvent(`Недостатъчен баланс за покупка (${marketPrice.toFixed(2)} EUR).`, true);
             }
@@ -579,12 +565,13 @@
         function sellItem(id) {
             if (!isConnected) return;
             if (inventory[id] > 0) {
-                let fee = marketPrice * 0.1304;       // Steam такса ≈ 13.04% от обявената цена
+                let fee = marketPrice * 0.1304;
                 let netProfit = marketPrice - fee;
                 wallet += netProfit;
                 inventory[id] -= 1;
                 logEvent(`Продадохте. Чисто (след такса): +${netProfit.toFixed(2)} EUR`);
                 saveAndRefresh();
+                notifyTrade('sell');
             } else {
                 logEvent(`Нямате този предмет в инвентара.`, true);
             }
@@ -596,7 +583,6 @@
             updateUI();
         }
 
-        // ── UI обновяване ─────────────────────────────────────────────
         function updateUI() {
             document.getElementById('wallet-display').innerText = `БАЛАНС: ${wallet.toFixed(2)} EUR`;
             document.getElementById('inv-count-dead-hand').innerText = inventory['dead-hand'] || 0;
@@ -613,7 +599,6 @@
         function voteClass(v) { return v === "BUY" ? "v-buy" : (v === "SELL" ? "v-sell" : "v-hold"); }
 
         function updateIndicatorsUI(d) {
-            // RSI
             const rsi = parseFloat(d.rsi || 50);
             document.getElementById('rsi-value').innerText = rsi.toFixed(1);
             const marker = document.getElementById('rsi-marker');
@@ -623,14 +608,12 @@
             else if (rsi <= 30) { rsiLabel.innerText = "свръхпродаден (<30)"; rsiLabel.style.color = "#00ff88"; }
             else { rsiLabel.innerText = "неутрален (30–70)"; rsiLabel.style.color = "#7d93ad"; }
 
-            // MACD
             const hist = parseFloat(d.macd_hist || 0);
             const macdEl = document.getElementById('macd-value');
             macdEl.innerText = hist.toFixed(4);
             macdEl.style.color = hist > 0 ? "#00ff88" : (hist < 0 ? "#ff3366" : "#ffffff");
             document.getElementById('macd-label').innerText = hist > 0 ? "възходящ импулс" : (hist < 0 ? "низходящ импулс" : "неутрален");
 
-            // Bollinger
             document.getElementById('boll-value').innerText = `${(+d.boll_lower).toFixed(2)} – ${(+d.boll_upper).toFixed(2)}`;
             const px = parseFloat(d.price || 0);
             const bl = document.getElementById('boll-label');
@@ -638,12 +621,9 @@
             else if (px < d.boll_lower) { bl.innerText = "цената е под долната лента"; bl.style.color = "#00ff88"; }
             else { bl.innerText = "в рамките на лентите"; bl.style.color = "#7d93ad"; }
 
-            // EMA / SMA trend
             document.getElementById('ema-value').innerText = `${(+d.ema).toFixed(2)} EUR`;
-            const emaLbl = document.getElementById('ema-label');
-            emaLbl.innerText = `SMA: ${(+d.sma).toFixed(2)} · ${px >= d.ema ? "цена над EMA ↑" : "цена под EMA ↓"}`;
+            document.getElementById('ema-label').innerText = `SMA: ${(+d.sma).toFixed(2)} · ${px >= d.ema ? "цена над EMA ↑" : "цена под EMA ↓"}`;
 
-            // Votes
             const votes = d.votes || {};
             const order = ["RSI", "MACD", "BOLL", "TREND"];
             document.getElementById('vote-chips').innerHTML = order
@@ -651,6 +631,22 @@
                 .map(k => `<span class="vote ${voteClass(votes[k])}">${k}: ${votes[k]}</span>`)
                 .join('');
             document.getElementById('agg-signal').innerText = `обобщен сигнал: ${d.signal || '--'}`;
+            applyMode(d.mode || 'sim');
+        }
+
+        let lastMode = null;
+        function applyMode(mode) {
+            if (mode === lastMode) return;
+            lastMode = mode;
+            const disc = document.getElementById('disclaimer');
+            const legend = document.getElementById('legend-real');
+            if (mode === 'real') {
+                if (legend) legend.innerHTML = '● Реална Steam цена';
+                disc.innerHTML = '✅ <b>Реален режим:</b> цената идва от Steam (lowest_price, а ако липсва — median). Има ДВА таймера: (1) плъзгачът „Скорост\u201C горе само опреснява екрана от локалния ти сървър — безопасен е на всяка стойност (3–10 сек) и НЕ пипа Steam; (2) сървърът пита Steam на всеки 30 сек (steamPollSec в main.go) — само този интервал е ограничен от Steam. Затова реалната цена се мени най-много веднъж на 30 сек, без значение къде е плъзгачът. Индикаторите (RSI, MACD, Bollinger) стават смислени чак след достатъчно реални точки; прогнозата (оранжево) е само догадка.';
+            } else {
+                if (legend) legend.innerHTML = '● Симулирана цена';
+                disc.innerHTML = '⚠️ <b>Учебен симулатор — изкуствени данни, не реални Steam цени.</b> Числата са измислени от програмата. Индикаторите описват миналото; не предсказват бъдещето със 100% сигурност. Оранжевата зона е „конус“ от възможности, не една линия.';
+            }
         }
 
         function setConnected(state) {
