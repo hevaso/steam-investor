@@ -100,8 +100,17 @@ func main() {
 	http.HandleFunc("/api/market-data", handleMarketData)
 	http.HandleFunc("/api/tick", handleTick)
 	http.HandleFunc("/api/trade", handleTrade)
-	fmt.Println("[SYSTEM] Сървърът е пуснат успешно на http://127.0.0.1:8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+    	http.ServeFile(w, r, "index.html")
+	})
+
+	port := os.Getenv("PORT")
+	if port == "" {
+	    port = "8080"
+	}
+	fmt.Println("[SYSTEM] Сървърът е пуснат успешно на host")
+	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
 func choosePrice(lowest, median float64) float64 {

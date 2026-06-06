@@ -449,7 +449,7 @@
         let wallet = parseFloat(localStorage.getItem('walletBalance')) || 50.00;
         let inventory = JSON.parse(localStorage.getItem('userInventory')) || { "dead-hand": 0 };
 
-        const API = 'http://127.0.0.1:8080';
+        const API = '';
 
         async function fetchAlgorithmTick() {
             try {
