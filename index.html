@@ -1,59 +1,346 @@
 <!DOCTYPE html>
 <html lang="bg">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Steam Market Simulator Local</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', system-ui, sans-serif; }
-        body { background-color: #06090c; color: #ffffff; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 1.5vh 1.5vw; overflow-x: hidden; }
-        .app-wrapper { width: 90vw; max-width: 1600px; display: flex; flex-direction: column; gap: 1.5vh; }
-        header { display: flex; justify-content: space-between; align-items: center; background: #0d1216; padding: 1.5vh 1.5vw; border-radius: 8px; border: 1px solid #172026; }
-        h1 { font-size: 1.4vw; font-weight: 800; background: linear-gradient(45deg, #00ff88, #00bfff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        .wallet-hub { background: #131a20; padding: 0.8vh 1vw; border-radius: 6px; border: 1px solid #00ff88; font-weight: bold; color: #00ff88; font-size: 1vw; }
-        .main-trading-area { display: grid; grid-template-columns: 20% 60% 20%; gap: 1vw; width: 100%; }
-        .side-panel { background: #0d1216; border-radius: 8px; border: 1px solid #172026; padding: 1.5vh 1vw; display: flex; flex-direction: column; height: 42vh; }
-        .panel-title { font-size: 0.8vw; color: #627893; text-transform: uppercase; font-weight: 700; margin-bottom: 1vh; border-bottom: 1px solid #172026; padding-bottom: 0.5vh; }
-        .news-feed { font-family: 'Courier New', Courier, monospace; font-size: 0.75vw; color: #00ff88; overflow-y: auto; flex-grow: 1; }
-        .inventory-list { overflow-y: auto; flex-grow: 1; display: flex; flex-direction: column; gap: 0.8vh; }
-        .inv-item { background: #131a20; padding: 0.8vh 0.6vw; border-radius: 4px; font-size: 0.8vw; display: flex; justify-content: space-between; border-left: 3px solid #00bfff; }
-        .tradingview-box { background: #0d1216; border-radius: 8px; padding: 2vh 1.5vw; border: 1px solid #172026; height: 42vh; display: flex; flex-direction: column; justify-content: space-between; }
-        .chart-viewport { width: 100%; height: 30vh; background: #070a0d; border-radius: 6px; border: 1px solid #131a20; position: relative; overflow: hidden; }
-        canvas { width: 100% !important; height: 100% !important; display: block; }
-        .products-container { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1vw; }
-        .item-card { background: #0d1216; border-radius: 8px; padding: 2vh 1vw; border: 1px solid #172026; position: relative; cursor: pointer; transition: border-color 0.2s; }
-        .item-card.active-card { border-color: #00bfff; box-shadow: 0 0 10px rgba(0, 191, 255, 0.2); }
-        .item-title { font-size: 0.9vw; font-weight: 600; margin-bottom: 1vh; }
-        .price-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5vh; }
-        .live-price { font-size: 1.3vw; font-weight: 700; }
-        .percent-up { color: #00ff88; font-size: 0.8vw; font-weight: bold; }
-        .percent-down { color: #ff3366; font-size: 0.8vw; font-weight: bold; }
-        .action-triggers { display: flex; gap: 0.4vw; }
-        .trade-btn { flex: 1; padding: 1vh 0; border: none; border-radius: 4px; font-weight: 700; font-size: 0.8vw; cursor: pointer; }
-        .btn-buy { background-color: #00ff88; color: #06090c; }
-        .btn-sell { background-color: #ff3366; color: #ffffff; }
-        .reset-btn { background: #25333d; color: #ffffff; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 0.7vw; }
-        .speed-control { display: flex; align-items: center; gap: 0.5vw; font-size: 0.8vw; color: #627893; }
-        .conn-dot { font-size: 0.8vw; font-weight: bold; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+        }
+
+        body {
+            background-color: #06090c;
+            color: #ffffff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 1.5vh 1.5vw;
+            overflow-x: hidden;
+        }
+
+        .app-wrapper {
+            width: 90vw;
+            max-width: 1600px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5vh;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #0d1216;
+            padding: 1.5vh 1.5vw;
+            border-radius: 8px;
+            border: 1px solid #172026;
+        }
+
+        h1 {
+            font-size: 1.4vw;
+            font-weight: 800;
+            background: linear-gradient(45deg, #00ff88, #00bfff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .wallet-hub {
+            background: #131a20;
+            padding: 0.8vh 1vw;
+            border-radius: 6px;
+            border: 1px solid #00ff88;
+            font-weight: bold;
+            color: #00ff88;
+            font-size: 1vw;
+        }
+
+        .main-trading-area {
+            display: grid;
+            grid-template-columns: 20% 60% 20%;
+            gap: 1vw;
+            width: 100%;
+        }
+
+        .side-panel {
+            background: #0d1216;
+            border-radius: 8px;
+            border: 1px solid #172026;
+            padding: 1.5vh 1vw;
+            display: flex;
+            flex-direction: column;
+            height: 42vh;
+        }
+
+        .panel-title {
+            font-size: 0.8vw;
+            color: #627893;
+            text-transform: uppercase;
+            font-weight: 700;
+            margin-bottom: 1vh;
+            border-bottom: 1px solid #172026;
+            padding-bottom: 0.5vh;
+        }
+
+        .news-feed {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.75vw;
+            color: #00ff88;
+            overflow-y: auto;
+            flex-grow: 1;
+        }
+
+        .inventory-list {
+            overflow-y: auto;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 0.8vh;
+        }
+
+        .inv-item {
+            background: #131a20;
+            padding: 0.8vh 0.6vw;
+            border-radius: 4px;
+            font-size: 0.8vw;
+            display: flex;
+            justify-content: space-between;
+            border-left: 3px solid #00bfff;
+        }
+
+        .tradingview-box {
+            background: #0d1216;
+            border-radius: 8px;
+            padding: 2vh 1.5vw;
+            border: 1px solid #172026;
+            height: 42vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .chart-viewport {
+            width: 100%;
+            height: 30vh;
+            background: #070a0d;
+            border-radius: 6px;
+            border: 1px solid #131a20;
+            position: relative;
+            overflow: hidden;
+        }
+
+        canvas {
+            width: 100% !important;
+            height: 100% !important;
+            display: block;
+        }
+
+        .products-container {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1vw;
+        }
+
+        .item-card {
+            background: #0d1216;
+            border-radius: 8px;
+            padding: 2vh 1vw;
+            border: 1px solid #172026;
+            position: relative;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+
+        .item-card.active-card {
+            border-color: #00bfff;
+            box-shadow: 0 0 10px rgba(0, 191, 255, 0.2);
+        }
+
+        .item-title {
+            font-size: 0.9vw;
+            font-weight: 600;
+            margin-bottom: 1vh;
+        }
+
+        .price-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5vh;
+        }
+
+        .live-price {
+            font-size: 1.3vw;
+            font-weight: 700;
+        }
+
+        .percent-up {
+            color: #00ff88;
+            font-size: 0.8vw;
+            font-weight: bold;
+        }
+
+        .percent-down {
+            color: #ff3366;
+            font-size: 0.8vw;
+            font-weight: bold;
+        }
+
+        .action-triggers {
+            display: flex;
+            gap: 0.4vw;
+        }
+
+        .trade-btn {
+            flex: 1;
+            padding: 1vh 0;
+            border: none;
+            border-radius: 4px;
+            font-weight: 700;
+            font-size: 0.8vw;
+            cursor: pointer;
+        }
+
+        .btn-buy {
+            background-color: #00ff88;
+            color: #06090c;
+        }
+
+        .btn-sell {
+            background-color: #ff3366;
+            color: #ffffff;
+        }
+
+        .reset-btn {
+            background: #25333d;
+            color: #ffffff;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.7vw;
+        }
+
+        .speed-control {
+            display: flex;
+            align-items: center;
+            gap: 0.5vw;
+            font-size: 0.8vw;
+            color: #627893;
+        }
+
+        .conn-dot {
+            font-size: 0.8vw;
+            font-weight: bold;
+        }
 
         /* --- ИНДИКАТОРИ (нова секция) --- */
-        .indicator-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1vw; }
-        .ind-card { background: #0d1216; border: 1px solid #172026; border-radius: 8px; padding: 1.4vh 1vw; }
-        .ind-name { font-size: 0.72vw; color: #627893; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
-        .ind-value { font-size: 1.15vw; font-weight: 800; margin: 0.4vh 0; }
-        .ind-sub { font-size: 0.68vw; color: #7d93ad; }
-        .rsi-track { height: 7px; background: linear-gradient(90deg,#00ff88 0%,#00ff88 30%,#2c3a44 30%,#2c3a44 70%,#ff3366 70%,#ff3366 100%); border-radius: 4px; position: relative; margin-top: 0.6vh; }
-        .rsi-marker { position: absolute; top: -3px; width: 3px; height: 13px; background: #fff; border-radius: 2px; transform: translateX(-50%); transition: left 0.3s; }
-        .vote-chips { display: flex; flex-wrap: wrap; gap: 0.4vw; margin-top: 0.5vh; }
-        .vote { font-size: 0.62vw; font-weight: 800; padding: 0.3vh 0.4vw; border-radius: 4px; letter-spacing: 0.3px; }
-        .v-buy { background: rgba(0,255,136,0.15); color: #00ff88; border: 1px solid rgba(0,255,136,0.4); }
-        .v-sell { background: rgba(255,51,102,0.15); color: #ff3366; border: 1px solid rgba(255,51,102,0.4); }
-        .v-hold { background: rgba(98,120,147,0.15); color: #92a7bd; border: 1px solid rgba(98,120,147,0.4); }
-        .disclaimer { background: #14100a; border: 1px solid #4a3a18; border-radius: 8px; padding: 1.2vh 1.2vw; font-size: 0.75vw; color: #ffd27a; line-height: 1.5; }
-        .disclaimer b { color: #ffb347; }
+        .indicator-strip {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 1vw;
+        }
+
+        .ind-card {
+            background: #0d1216;
+            border: 1px solid #172026;
+            border-radius: 8px;
+            padding: 1.4vh 1vw;
+        }
+
+        .ind-name {
+            font-size: 0.72vw;
+            color: #627893;
+            text-transform: uppercase;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+
+        .ind-value {
+            font-size: 1.15vw;
+            font-weight: 800;
+            margin: 0.4vh 0;
+        }
+
+        .ind-sub {
+            font-size: 0.68vw;
+            color: #7d93ad;
+        }
+
+        .rsi-track {
+            height: 7px;
+            background: linear-gradient(90deg, #00ff88 0%, #00ff88 30%, #2c3a44 30%, #2c3a44 70%, #ff3366 70%, #ff3366 100%);
+            border-radius: 4px;
+            position: relative;
+            margin-top: 0.6vh;
+        }
+
+        .rsi-marker {
+            position: absolute;
+            top: -3px;
+            width: 3px;
+            height: 13px;
+            background: #fff;
+            border-radius: 2px;
+            transform: translateX(-50%);
+            transition: left 0.3s;
+        }
+
+        .vote-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4vw;
+            margin-top: 0.5vh;
+        }
+
+        .vote {
+            font-size: 0.62vw;
+            font-weight: 800;
+            padding: 0.3vh 0.4vw;
+            border-radius: 4px;
+            letter-spacing: 0.3px;
+        }
+
+        .v-buy {
+            background: rgba(0, 255, 136, 0.15);
+            color: #00ff88;
+            border: 1px solid rgba(0, 255, 136, 0.4);
+        }
+
+        .v-sell {
+            background: rgba(255, 51, 102, 0.15);
+            color: #ff3366;
+            border: 1px solid rgba(255, 51, 102, 0.4);
+        }
+
+        .v-hold {
+            background: rgba(98, 120, 147, 0.15);
+            color: #92a7bd;
+            border: 1px solid rgba(98, 120, 147, 0.4);
+        }
+
+        .disclaimer {
+            background: #14100a;
+            border: 1px solid #4a3a18;
+            border-radius: 8px;
+            padding: 1.2vh 1.2vw;
+            font-size: 0.75vw;
+            color: #ffd27a;
+            line-height: 1.5;
+        }
+
+        .disclaimer b {
+            color: #ffb347;
+        }
     </style>
 </head>
+
 <body>
 
     <div class="app-wrapper">
@@ -81,7 +368,8 @@
 
             <main class="tradingview-box">
                 <div style="display: flex; justify-content: space-between;">
-                    <div style="font-size: 1.1vw; font-weight: 600;" id="chart-title">📊 Графика: Sealed Dead Hand Terminal</div>
+                    <div style="font-size: 1.1vw; font-weight: 600;" id="chart-title">📊 Графика: Sealed Dead Hand
+                        Terminal</div>
                     <div style="display: flex; gap: 1vw; font-size: 0.8vw; font-weight: bold;">
                         <span style="color: #00e5ff;">● Реална цена</span>
                         <span style="color: #ff3d00;">● Прогноза (несигурна)</span>
@@ -106,7 +394,9 @@
                 <div class="ind-name">RSI (14)</div>
                 <div class="ind-value" id="rsi-value">--</div>
                 <div class="ind-sub" id="rsi-label">изчакване</div>
-                <div class="rsi-track"><div class="rsi-marker" id="rsi-marker" style="left:50%;"></div></div>
+                <div class="rsi-track">
+                    <div class="rsi-marker" id="rsi-marker" style="left:50%;"></div>
+                </div>
             </div>
             <div class="ind-card">
                 <div class="ind-name">MACD</div>
@@ -131,7 +421,9 @@
         </section>
 
         <section>
-            <div style="margin-bottom: 1vh; font-size: 0.9vw; color: #627893; font-weight: 700; text-transform: uppercase;">Пазарни Продукти</div>
+            <div
+                style="margin-bottom: 1vh; font-size: 0.9vw; color: #627893; font-weight: 700; text-transform: uppercase;">
+                Пазарни Продукти</div>
             <div class="products-container">
                 <div class="item-card active-card" id="card-dead-hand">
                     <div class="item-title">Sealed Dead Hand Terminal</div>
@@ -148,7 +440,10 @@
         </section>
 
         <div class="disclaimer">
-            ⚠️ <b>Това е учебен симулатор, не реални Steam цени.</b> Индикаторите (RSI, MACD, Bollinger) описват какво вече се е случило — те НЕ предсказват бъдещето със 100% сигурност. Никой инструмент не може. Оранжевата зона на графиката показва точно това: бъдещето е „конус“ от възможности, който се разширява, не една линия. Истинската търговия носи риск от загуба (такса 13–15%, спадащи цени, ликвидност).
+            ⚠️ <b>Това е учебен симулатор, не реални Steam цени.</b> Индикаторите (RSI, MACD, Bollinger) описват какво
+            вече се е случило — те НЕ предсказват бъдещето със 100% сигурност. Никой инструмент не може. Оранжевата зона
+            на графиката показва точно това: бъдещето е „конус“ от възможности, който се разширява, не една линия.
+            Истинската търговия носи риск от загуба (такса 13–15%, спадащи цени, ликвидност).
         </div>
     </div>
 
@@ -380,4 +675,5 @@
         window.addEventListener('load', () => { updateUI(); fetchAlgorithmTick(); });
     </script>
 </body>
+
 </html>
