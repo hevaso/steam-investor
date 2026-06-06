@@ -3,70 +3,65 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"math/rand"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  DATA TYPES
-// ─────────────────────────────────────────────────────────────────────────────
+const (
+	useRealSteam  = true
+	steamAppID    = "730"
+	steamItemName = "G18BD283004"
+	steamCurrency = "3"
+	steamPollSec  = 30
+	simStartPrice = 1.50
+)
 
-// ChartPoint is one point on the price line.
-// Real (historical) points have IsPredict=false.
-// Forecast points have IsPredict=true and carry an Upper/Lower uncertainty band.
 type ChartPoint struct {
 	Price     float64  `json:"price"`
 	IsPredict bool     `json:"is_predict"`
-	Upper     *float64 `json:"upper,omitempty"` // top of the confidence cone (forecast only)
-	Lower     *float64 `json:"lower,omitempty"` // bottom of the confidence cone (forecast only)
+	Upper     *float64 `json:"upper,omitempty"`
+	Lower     *float64 `json:"lower,omitempty"`
 }
 
-// TickResponse is the live snapshot sent to the front-end every poll.
-// It carries the current price, the aggregate signal, AND the raw value of
-// every indicator so the UI can teach the user what is going on.
 type TickResponse struct {
 	Price    float64           `json:"price"`
-	Signal   string            `json:"signal"`      // BUY / SELL / HOLD (aggregate of all indicators)
-	Rsi      float64           `json:"rsi"`         // Relative Strength Index (0-100)
-	Sma      float64           `json:"sma"`         // Simple Moving Average (20)
-	Ema      float64           `json:"ema"`         // Exponential Moving Average (20)
-	MacdLine float64           `json:"macd"`        // MACD line (EMA12 - EMA26)
-	MacdSig  float64           `json:"macd_signal"` // signal line (EMA9 of MACD)
-	MacdHist float64           `json:"macd_hist"`   // histogram (MACD - signal)
-	BollUp   float64           `json:"boll_upper"`  // upper Bollinger band
-	BollMid  float64           `json:"boll_mid"`    // middle Bollinger band (= SMA20)
-	BollLow  float64           `json:"boll_lower"`  // lower Bollinger band
-	Votes    map[string]string `json:"votes"`       // what each indicator "thinks": BUY/SELL/HOLD
-	Note     string            `json:"note"`        // honesty reminder shown in the UI
+	Signal   string            `json:"signal"`
+	Mode     string            `json:"mode"`
+	Rsi      float64           `json:"rsi"`
+	Sma      float64           `json:"sma"`
+	Ema      float64           `json:"ema"`
+	MacdLine float64           `json:"macd"`
+	MacdSig  float64           `json:"macd_signal"`
+	MacdHist float64           `json:"macd_hist"`
+	BollUp   float64           `json:"boll_upper"`
+	BollMid  float64           `json:"boll_mid"`
+	BollLow  float64           `json:"boll_lower"`
+	Votes    map[string]string `json:"votes"`
+	Note     string            `json:"note"`
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  GLOBAL STATE
-// ─────────────────────────────────────────────────────────────────────────────
-
 var (
-	history    []ChartPoint // REAL points only (the past)
-	prediction []ChartPoint // forecast segment, rebuilt every tick
-	snapshot   TickResponse // latest indicator snapshot
-	mu         sync.Mutex
-
-	currentPrice float64 = 3.00 // live "real" price the simulator walks around
-	basePrice    float64 = 3.00 // the value the simulated price gently reverts to
+	history      []ChartPoint
+	prediction   []ChartPoint
+	snapshot     TickResponse
+	mu           sync.Mutex
+	currentPrice float64 = simStartPrice
+	basePrice    float64 = simStartPrice
 )
 
 const (
-	maxHistory   = 90 // how many real points we keep
-	forecastLen  = 8  // how many future points we project
-	tickInterval = 800 * time.Millisecond
+	maxHistory  = 90
+	forecastLen = 8
+	simTick     = 3000 * time.Millisecond
 )
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  MAIN
-// ─────────────────────────────────────────────────────────────────────────────
 
 func setupCORS(w *http.ResponseWriter, r *http.Request) bool {
 	(*w).Header().Set("Access-Control-Allow-Origin", "*")
@@ -81,29 +76,120 @@ func setupCORS(w *http.ResponseWriter, r *http.Request) bool {
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
-
-	fmt.Println("[SYSTEM] Генериране на начална история за Sealed Dead Hand Terminal...")
-	generateInitialHistory(60) // seed enough points so every indicator is "warm" immediately
-	recompute()                // build the first snapshot + forecast
-
-	go runMarketEngine()
-
+	if useRealSteam {
+		fmt.Println("[SYSTEM] РЕАЛЕН режим: теглене на цена от Steam за", steamItemName)
+		price, lowest, median, vol, err := fetchSteamPrice()
+		if err != nil {
+			fmt.Println("[STEAM] ВНИМАНИЕ: началната заявка се провали:", err)
+			fmt.Println("[STEAM] Провери steamItemName (частта от URL след /730/) и че имаш интернет.")
+		} else if price > 0 {
+			currentPrice = price
+			basePrice = price
+			history = append(history, ChartPoint{Price: round2(price), IsPredict: false})
+			fmt.Printf("[STEAM] OK -> цена=%.2f EUR (lowest=%.2f median=%.2f) обем=%s\n", price, lowest, median, vol)
+		} else {
+			fmt.Println("[STEAM] ВНИМАНИЕ: Steam не върна цена (нито lowest, нито median).")
+		}
+		go runRealEngine()
+	} else {
+		fmt.Println("[SYSTEM] СИМУЛАЦИОНЕН режим (изкуствени данни).")
+		generateInitialHistory(60)
+		go runMarketEngine()
+	}
+	recompute()
 	http.HandleFunc("/api/market-data", handleMarketData)
 	http.HandleFunc("/api/tick", handleTick)
-
+	http.HandleFunc("/api/trade", handleTrade)
 	fmt.Println("[SYSTEM] Сървърът е пуснат успешно на http://127.0.0.1:8080")
-	fmt.Println("[SYSTEM] Отвори index.html в браузъра...")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  THE SIMULATED MARKET
-//  NOTE: this is a *simulator*. The price is a mean-reverting random walk, NOT
-//  real Steam Market data. See the README notes for how to plug in real prices.
-// ─────────────────────────────────────────────────────────────────────────────
+func choosePrice(lowest, median float64) float64 {
+	if lowest > 0 {
+		return lowest
+	}
+	return median
+}
+
+func fetchSteamPrice() (price, lowest, median float64, volume string, err error) {
+	endpoint := fmt.Sprintf("https://steamcommunity.com/market/priceoverview/?appid=%s&currency=%s&market_hash_name=%s",
+		steamAppID, steamCurrency, url.QueryEscape(steamItemName))
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, _ := http.NewRequest("GET", endpoint, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	resp, e := client.Do(req)
+	if e != nil {
+		return 0, 0, 0, "", e
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return 0, 0, 0, "", fmt.Errorf("steam HTTP %d (вероятно rate-limit, изчакай малко)", resp.StatusCode)
+	}
+	var sp struct {
+		Success     bool   `json:"success"`
+		LowestPrice string `json:"lowest_price"`
+		MedianPrice string `json:"median_price"`
+		Volume      string `json:"volume"`
+	}
+	if e := json.Unmarshal(body, &sp); e != nil {
+		return 0, 0, 0, "", e
+	}
+	if !sp.Success {
+		return 0, 0, 0, "", fmt.Errorf("success=false (грешно market_hash_name?)")
+	}
+	lowest = parsePrice(sp.LowestPrice)
+	median = parsePrice(sp.MedianPrice)
+	return choosePrice(lowest, median), lowest, median, sp.Volume, nil
+}
+
+func parsePrice(s string) float64 {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= '0' && r <= '9') || r == ',' || r == '.' {
+			b.WriteRune(r)
+		}
+	}
+	t := b.String()
+	if t == "" {
+		return 0
+	}
+	lastComma := strings.LastIndex(t, ",")
+	lastDot := strings.LastIndex(t, ".")
+	if lastComma > lastDot {
+		t = strings.ReplaceAll(t, ".", "")
+		t = strings.Replace(t, ",", ".", 1)
+		t = strings.ReplaceAll(t, ",", "")
+	} else {
+		t = strings.ReplaceAll(t, ",", "")
+	}
+	f, _ := strconv.ParseFloat(t, 64)
+	return f
+}
+
+func runRealEngine() {
+	for {
+		time.Sleep(time.Duration(steamPollSec) * time.Second)
+		price, _, _, _, err := fetchSteamPrice()
+		if err != nil {
+			fmt.Println("[STEAM] Грешка при заявка:", err)
+			continue
+		}
+		if price > 0 {
+			mu.Lock()
+			currentPrice = price
+			history = append(history, ChartPoint{Price: round2(price), IsPredict: false})
+			if len(history) > maxHistory {
+				history = history[len(history)-maxHistory:]
+			}
+			recompute()
+			mu.Unlock()
+		}
+	}
+}
 
 func runMarketEngine() {
-	ticker := time.NewTicker(tickInterval)
+	ticker := time.NewTicker(simTick)
 	defer ticker.Stop()
 	for {
 		<-ticker.C
@@ -114,8 +200,6 @@ func runMarketEngine() {
 	}
 }
 
-// stepPrice moves the simulated price one tick: a little pull toward the base
-// price (so it oscillates realistically instead of wandering off) plus noise.
 func stepPrice() {
 	reversion := (basePrice - currentPrice) * 0.02
 	noise := (rand.Float64() * 0.12) - 0.06
@@ -129,7 +213,6 @@ func stepPrice() {
 	}
 }
 
-// generateInitialHistory pre-fills the chart so it isn't empty on first load.
 func generateInitialHistory(points int) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -144,22 +227,24 @@ func generateInitialHistory(points int) {
 	}
 }
 
-// recompute recalculates every indicator, the aggregate signal, and the
-// forecast segment. Called after each price step (already under mu.Lock()).
 func recompute() {
 	prices := realPrices()
-
 	rsiV := rsi(prices, 14)
 	smaV := sma(prices, 20)
 	emaV := lastF(emaSeries(prices, 20))
 	macdLine, macdSig, macdHist := macd(prices)
 	bMid, bUp, bLow := bollinger(prices, 20, 2.0)
-
 	votes, signal := decideSignal(round2(currentPrice), rsiV, macdHist, bLow, bUp, emaV)
-
+	mode := "sim"
+	note := "Симулирана среда (изкуствени данни). Индикаторите описват миналото; не предсказват бъдещето."
+	if useRealSteam {
+		mode = "real"
+		note = "Реална цена от Steam, обновявана периодично. Индикаторите се нуждаят от достатъчно реални точки."
+	}
 	snapshot = TickResponse{
 		Price:    round2(currentPrice),
 		Signal:   signal,
+		Mode:     mode,
 		Rsi:      round2(rsiV),
 		Sma:      round2(smaV),
 		Ema:      round2(emaV),
@@ -170,18 +255,11 @@ func recompute() {
 		BollMid:  round2(bMid),
 		BollLow:  round2(bLow),
 		Votes:    votes,
-		Note:     "Симулирана среда. Индикаторите ОПИСВАТ миналото; те не предсказват бъдещето със сигурност.",
+		Note:     note,
 	}
-
 	prediction = buildForecast(prices, forecastLen)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  TECHNICAL INDICATORS  (the actual math)
-// ─────────────────────────────────────────────────────────────────────────────
-
-// SMA — Simple Moving Average. The plain average of the last `period` prices.
-// It smooths out noise so you can see the underlying trend.
 func sma(prices []float64, period int) float64 {
 	if period <= 0 || len(prices) < period {
 		return lastF(prices)
@@ -193,9 +271,6 @@ func sma(prices []float64, period int) float64 {
 	return sum / float64(period)
 }
 
-// EMA — Exponential Moving Average. Like SMA but weights recent prices more
-// heavily, so it reacts faster to new moves. Returns the full series because
-// MACD needs an EMA-of-an-EMA.
 func emaSeries(prices []float64, period int) []float64 {
 	n := len(prices)
 	out := make([]float64, n)
@@ -210,7 +285,6 @@ func emaSeries(prices []float64, period int) []float64 {
 		}
 		return out
 	}
-	// seed with the SMA of the first `period` values
 	seed := 0.0
 	for i := 0; i < period; i++ {
 		seed += prices[i]
@@ -225,12 +299,9 @@ func emaSeries(prices []float64, period int) []float64 {
 	return out
 }
 
-// RSI — Relative Strength Index (0-100), using Wilder's smoothing.
-// >70 is "overbought" (price may have risen too fast); <30 is "oversold".
-// It is a momentum gauge, NOT a price predictor.
 func rsi(prices []float64, period int) float64 {
 	if len(prices) <= period {
-		return 50.0 // neutral until we have enough data
+		return 50.0
 	}
 	var gain, loss float64
 	for i := 1; i <= period; i++ {
@@ -261,9 +332,6 @@ func rsi(prices []float64, period int) float64 {
 	return 100.0 - (100.0 / (1.0 + rs))
 }
 
-// MACD — Moving Average Convergence Divergence.
-// macdLine = EMA12 - EMA26 (momentum), signal = EMA9 of macdLine.
-// histogram = macdLine - signal. Histogram crossing above 0 is bullish.
 func macd(prices []float64) (macdLine, signalLine, hist float64) {
 	if len(prices) < 2 {
 		return 0, 0, 0
@@ -282,8 +350,6 @@ func macd(prices []float64) (macdLine, signalLine, hist float64) {
 	return
 }
 
-// Bollinger Bands — a moving average (mid) with bands `k` standard deviations
-// above and below. Price touching the upper band = stretched high; lower = low.
 func bollinger(prices []float64, period int, k float64) (mid, upper, lower float64) {
 	mid = sma(prices, period)
 	sd := stddev(prices, period)
@@ -306,16 +372,9 @@ func stddev(prices []float64, period int) float64 {
 	return math.Sqrt(sum / float64(period))
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  SIGNAL AGGREGATION
-//  Each indicator casts a vote. We sum them. This deliberately shows that
-//  indicators OFTEN DISAGREE — that disagreement is the honest reality.
-// ─────────────────────────────────────────────────────────────────────────────
-
 func decideSignal(price, rsiV, macdHist, bollLow, bollUp, emaV float64) (map[string]string, string) {
 	votes := map[string]string{}
 	score := 0
-
 	switch {
 	case rsiV < 30:
 		votes["RSI"] = "BUY"
@@ -326,7 +385,6 @@ func decideSignal(price, rsiV, macdHist, bollLow, bollUp, emaV float64) (map[str
 	default:
 		votes["RSI"] = "HOLD"
 	}
-
 	switch {
 	case macdHist > 0:
 		votes["MACD"] = "BUY"
@@ -337,7 +395,6 @@ func decideSignal(price, rsiV, macdHist, bollLow, bollUp, emaV float64) (map[str
 	default:
 		votes["MACD"] = "HOLD"
 	}
-
 	switch {
 	case price < bollLow:
 		votes["BOLL"] = "BUY"
@@ -348,7 +405,6 @@ func decideSignal(price, rsiV, macdHist, bollLow, bollUp, emaV float64) (map[str
 	default:
 		votes["BOLL"] = "HOLD"
 	}
-
 	switch {
 	case price > emaV:
 		votes["TREND"] = "BUY"
@@ -359,7 +415,6 @@ func decideSignal(price, rsiV, macdHist, bollLow, bollUp, emaV float64) (map[str
 	default:
 		votes["TREND"] = "HOLD"
 	}
-
 	signal := "HOLD"
 	if score >= 2 {
 		signal = "BUY"
@@ -368,15 +423,6 @@ func decideSignal(price, rsiV, macdHist, bollLow, bollUp, emaV float64) (map[str
 	}
 	return votes, signal
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  FORECAST  (honest, illustrative — NOT a guarantee)
-//  We blend two simple ideas: momentum (continue the recent EMA slope) and
-//  mean-reversion (drift back toward the Bollinger middle). The confidence band
-//  widens with the square root of the horizon, exactly because uncertainty
-//  grows the further ahead you look. This is here to TEACH that the future is
-//  a cone of possibilities, not a single line.
-// ─────────────────────────────────────────────────────────────────────────────
 
 func buildForecast(prices []float64, steps int) []ChartPoint {
 	n := len(prices)
@@ -387,11 +433,10 @@ func buildForecast(prices []float64, steps int) []ChartPoint {
 	e := emaSeries(prices, 10)
 	slope := 0.0
 	if n >= 4 {
-		slope = (e[n-1] - e[n-4]) / 3.0 // average EMA change per step
+		slope = (e[n-1] - e[n-4]) / 3.0
 	}
 	mid := sma(prices, 20)
 	vol := stddev(prices, 14)
-
 	out := make([]ChartPoint, 0, steps)
 	p := cur
 	for i := 1; i <= steps; i++ {
@@ -400,7 +445,7 @@ func buildForecast(prices []float64, steps int) []ChartPoint {
 		if p < 0.20 {
 			p = 0.20
 		}
-		band := vol * math.Sqrt(float64(i)) // uncertainty grows with horizon
+		band := vol * math.Sqrt(float64(i))
 		up := round2(p + band)
 		lo := round2(p - band)
 		if lo < 0.05 {
@@ -410,10 +455,6 @@ func buildForecast(prices []float64, steps int) []ChartPoint {
 	}
 	return out
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  HTTP HANDLERS
-// ─────────────────────────────────────────────────────────────────────────────
 
 func handleTick(w http.ResponseWriter, r *http.Request) {
 	if setupCORS(&w, r) {
@@ -432,9 +473,8 @@ func handleMarketData(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	mu.Lock()
-	out := make([]ChartPoint, 0, len(history)+len(prediction))
+	out := make([]ChartPoint, 0, len(history)+len(prediction)+1)
 	out = append(out, history...)
-	// connect the forecast to the last real point so the dashed line starts there
 	if len(history) > 0 && len(prediction) > 0 {
 		last := history[len(history)-1].Price
 		out = append(out, ChartPoint{Price: last, IsPredict: true, Upper: &last, Lower: &last})
@@ -444,9 +484,29 @@ func handleMarketData(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(out)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
+func handleTrade(w http.ResponseWriter, r *http.Request) {
+	if setupCORS(&w, r) {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	action := r.URL.Query().Get("action")
+	mu.Lock()
+	if !useRealSteam {
+		switch action {
+		case "buy":
+			currentPrice += currentPrice * 0.004
+		case "sell":
+			currentPrice -= currentPrice * 0.004
+		}
+		if currentPrice < 0.20 {
+			currentPrice = 0.20
+		}
+		recompute()
+	}
+	resp := snapshot
+	mu.Unlock()
+	json.NewEncoder(w).Encode(resp)
+}
 
 func realPrices() []float64 {
 	out := make([]float64, len(history))
