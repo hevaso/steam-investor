@@ -30,18 +30,18 @@ type ChartPoint struct {
 // every indicator so the UI can teach the user what is going on.
 type TickResponse struct {
 	Price    float64           `json:"price"`
-	Signal   string            `json:"signal"`       // BUY / SELL / HOLD (aggregate of all indicators)
-	Rsi      float64           `json:"rsi"`          // Relative Strength Index (0-100)
-	Sma      float64           `json:"sma"`          // Simple Moving Average (20)
-	Ema      float64           `json:"ema"`          // Exponential Moving Average (20)
-	MacdLine float64           `json:"macd"`         // MACD line (EMA12 - EMA26)
-	MacdSig  float64           `json:"macd_signal"`  // signal line (EMA9 of MACD)
-	MacdHist float64           `json:"macd_hist"`    // histogram (MACD - signal)
-	BollUp   float64           `json:"boll_upper"`   // upper Bollinger band
-	BollMid  float64           `json:"boll_mid"`     // middle Bollinger band (= SMA20)
-	BollLow  float64           `json:"boll_lower"`   // lower Bollinger band
-	Votes    map[string]string `json:"votes"`        // what each indicator "thinks": BUY/SELL/HOLD
-	Note     string            `json:"note"`         // honesty reminder shown in the UI
+	Signal   string            `json:"signal"`      // BUY / SELL / HOLD (aggregate of all indicators)
+	Rsi      float64           `json:"rsi"`         // Relative Strength Index (0-100)
+	Sma      float64           `json:"sma"`         // Simple Moving Average (20)
+	Ema      float64           `json:"ema"`         // Exponential Moving Average (20)
+	MacdLine float64           `json:"macd"`        // MACD line (EMA12 - EMA26)
+	MacdSig  float64           `json:"macd_signal"` // signal line (EMA9 of MACD)
+	MacdHist float64           `json:"macd_hist"`   // histogram (MACD - signal)
+	BollUp   float64           `json:"boll_upper"`  // upper Bollinger band
+	BollMid  float64           `json:"boll_mid"`    // middle Bollinger band (= SMA20)
+	BollLow  float64           `json:"boll_lower"`  // lower Bollinger band
+	Votes    map[string]string `json:"votes"`       // what each indicator "thinks": BUY/SELL/HOLD
+	Note     string            `json:"note"`        // honesty reminder shown in the UI
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
