@@ -106,12 +106,8 @@ func main() {
     	http.ServeFile(w, r, "index.html")
 	})
 
-	port := os.Getenv("PORT")
-	if port == "" {
-	    port = "8080"
-	}
-	fmt.Println("[SYSTEM] Сървърът е пуснат успешно на host")
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Fatal(http.ListenAndServe(":8080", nil))
+	fmt.Println("[SYSTEM] Сървърът е пуснат успешно на :8080")
 }
 
 func choosePrice(lowest, median float64) float64 {
