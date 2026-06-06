@@ -3,75 +3,381 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Steam Market Simulator</title>
+    <title>Steam Market Simulator Local</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #06090c; color: white; font-family: sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .container { width: 900px; background: #0d1216; padding: 20px; border-radius: 12px; border: 1px solid #172026; }
-        .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
-        .chart-box { width: 100%; height: 400px; background: #070a0d; padding: 10px; border-radius: 8px; }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', system-ui, sans-serif; }
+        body { background-color: #06090c; color: #ffffff; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 1.5vh 1.5vw; overflow-x: hidden; }
+        .app-wrapper { width: 90vw; max-width: 1600px; display: flex; flex-direction: column; gap: 1.5vh; }
+        header { display: flex; justify-content: space-between; align-items: center; background: #0d1216; padding: 1.5vh 1.5vw; border-radius: 8px; border: 1px solid #172026; }
+        h1 { font-size: 1.4vw; font-weight: 800; background: linear-gradient(45deg, #00ff88, #00bfff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .wallet-hub { background: #131a20; padding: 0.8vh 1vw; border-radius: 6px; border: 1px solid #00ff88; font-weight: bold; color: #00ff88; font-size: 1vw; }
+        .main-trading-area { display: grid; grid-template-columns: 20% 60% 20%; gap: 1vw; width: 100%; }
+        .side-panel { background: #0d1216; border-radius: 8px; border: 1px solid #172026; padding: 1.5vh 1vw; display: flex; flex-direction: column; height: 42vh; }
+        .panel-title { font-size: 0.8vw; color: #627893; text-transform: uppercase; font-weight: 700; margin-bottom: 1vh; border-bottom: 1px solid #172026; padding-bottom: 0.5vh; }
+        .news-feed { font-family: 'Courier New', Courier, monospace; font-size: 0.75vw; color: #00ff88; overflow-y: auto; flex-grow: 1; }
+        .inventory-list { overflow-y: auto; flex-grow: 1; display: flex; flex-direction: column; gap: 0.8vh; }
+        .inv-item { background: #131a20; padding: 0.8vh 0.6vw; border-radius: 4px; font-size: 0.8vw; display: flex; justify-content: space-between; border-left: 3px solid #00bfff; }
+        .tradingview-box { background: #0d1216; border-radius: 8px; padding: 2vh 1.5vw; border: 1px solid #172026; height: 42vh; display: flex; flex-direction: column; justify-content: space-between; }
+        .chart-viewport { width: 100%; height: 30vh; background: #070a0d; border-radius: 6px; border: 1px solid #131a20; position: relative; overflow: hidden; }
+        canvas { width: 100% !important; height: 100% !important; display: block; }
+        .products-container { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1vw; }
+        .item-card { background: #0d1216; border-radius: 8px; padding: 2vh 1vw; border: 1px solid #172026; position: relative; cursor: pointer; transition: border-color 0.2s; }
+        .item-card.active-card { border-color: #00bfff; box-shadow: 0 0 10px rgba(0, 191, 255, 0.2); }
+        .item-title { font-size: 0.9vw; font-weight: 600; margin-bottom: 1vh; }
+        .price-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5vh; }
+        .live-price { font-size: 1.3vw; font-weight: 700; }
+        .percent-up { color: #00ff88; font-size: 0.8vw; font-weight: bold; }
+        .percent-down { color: #ff3366; font-size: 0.8vw; font-weight: bold; }
+        .action-triggers { display: flex; gap: 0.4vw; }
+        .trade-btn { flex: 1; padding: 1vh 0; border: none; border-radius: 4px; font-weight: 700; font-size: 0.8vw; cursor: pointer; }
+        .btn-buy { background-color: #00ff88; color: #06090c; }
+        .btn-sell { background-color: #ff3366; color: #ffffff; }
+        .reset-btn { background: #25333d; color: #ffffff; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 0.7vw; }
+        .speed-control { display: flex; align-items: center; gap: 0.5vw; font-size: 0.8vw; color: #627893; }
+        .conn-dot { font-size: 0.8vw; font-weight: bold; }
+
+        /* --- ИНДИКАТОРИ (нова секция) --- */
+        .indicator-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1vw; }
+        .ind-card { background: #0d1216; border: 1px solid #172026; border-radius: 8px; padding: 1.4vh 1vw; }
+        .ind-name { font-size: 0.72vw; color: #627893; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
+        .ind-value { font-size: 1.15vw; font-weight: 800; margin: 0.4vh 0; }
+        .ind-sub { font-size: 0.68vw; color: #7d93ad; }
+        .rsi-track { height: 7px; background: linear-gradient(90deg,#00ff88 0%,#00ff88 30%,#2c3a44 30%,#2c3a44 70%,#ff3366 70%,#ff3366 100%); border-radius: 4px; position: relative; margin-top: 0.6vh; }
+        .rsi-marker { position: absolute; top: -3px; width: 3px; height: 13px; background: #fff; border-radius: 2px; transform: translateX(-50%); transition: left 0.3s; }
+        .vote-chips { display: flex; flex-wrap: wrap; gap: 0.4vw; margin-top: 0.5vh; }
+        .vote { font-size: 0.62vw; font-weight: 800; padding: 0.3vh 0.4vw; border-radius: 4px; letter-spacing: 0.3px; }
+        .v-buy { background: rgba(0,255,136,0.15); color: #00ff88; border: 1px solid rgba(0,255,136,0.4); }
+        .v-sell { background: rgba(255,51,102,0.15); color: #ff3366; border: 1px solid rgba(255,51,102,0.4); }
+        .v-hold { background: rgba(98,120,147,0.15); color: #92a7bd; border: 1px solid rgba(98,120,147,0.4); }
+        .disclaimer { background: #14100a; border: 1px solid #4a3a18; border-radius: 8px; padding: 1.2vh 1.2vw; font-size: 0.75vw; color: #ffd27a; line-height: 1.5; }
+        .disclaimer b { color: #ffb347; }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <div class="header">
-        <h1>Dead Hand Market Terminal</h1>
-        <div id="status" style="color: #00ff88; font-weight: bold;">Свързване...</div>
-    </div>
-    <div class="chart-box">
-        <canvas id="goMarketChart"></canvas>
-    </div>
-</div>
+    <div class="app-wrapper">
+        <header>
+            <h1>STEAM MARKET ALGORITHMIC TERMINAL (LOCAL ENGINE)</h1>
+            <div style="display: flex; align-items: center; gap: 1vw;">
+                <div class="conn-dot" id="conn-status" style="color:#627893;">● ИЗЧАКВАНЕ</div>
+                <div class="speed-control">
+                    <span>Скорост:</span>
+                    <input type="range" id="speed-slider" min="100" max="2000" value="500" step="100">
+                    <span id="speed-val">500ms</span>
+                </div>
+                <button class="reset-btn" onclick="resetGame()">Рестарт прогрес</button>
+                <div class="wallet-hub" id="wallet-display">БАЛАНС: 50.00 EUR</div>
+            </div>
+        </header>
 
-<script>
-    let chartInstance = null;
+        <div class="main-trading-area">
+            <div class="side-panel">
+                <div class="panel-title">📡 Live Market Feed</div>
+                <div class="news-feed" id="log-feed">
+                    <div>[SYSTEM] Заредена локална сесия. Очакване на двигател...</div>
+                </div>
+            </div>
 
-    async function fetchMarketData() {
-        try {
-            // Връзка с Go сървъра на порт 8081
-            let [tickRes, chartRes] = await Promise.all([
-                fetch('http://127.0.0.1:8081/api/tick'),
-                fetch('http://127.0.0.1:8081/api/market-data')
-            ]);
-            
-            let tick = await tickRes.json();
-            let data = await chartRes.json();
-            
-            document.getElementById('status').innerText = `Цена: ${tick.price.toFixed(2)} EUR | Сигнал: ${tick.signal}`;
-            renderChart(data);
-        } catch (e) {
-            document.getElementById('status').innerText = "Грешка: Сървърът не работи!";
+            <main class="tradingview-box">
+                <div style="display: flex; justify-content: space-between;">
+                    <div style="font-size: 1.1vw; font-weight: 600;" id="chart-title">📊 Графика: Sealed Dead Hand Terminal</div>
+                    <div style="display: flex; gap: 1vw; font-size: 0.8vw; font-weight: bold;">
+                        <span style="color: #00e5ff;">● Реална цена</span>
+                        <span style="color: #ff3d00;">● Прогноза (несигурна)</span>
+                    </div>
+                </div>
+                <div class="chart-viewport">
+                    <canvas id="goMarketChart"></canvas>
+                </div>
+            </main>
+
+            <div class="side-panel">
+                <div class="panel-title">🎒 Вашият Инвентар</div>
+                <div class="inventory-list">
+                    <div class="inv-item"><span>Dead Hand Terminal</span> <b id="inv-count-dead-hand">0</b></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- НОВА СЕКЦИЯ: Индикатори в реално време -->
+        <section class="indicator-strip">
+            <div class="ind-card">
+                <div class="ind-name">RSI (14)</div>
+                <div class="ind-value" id="rsi-value">--</div>
+                <div class="ind-sub" id="rsi-label">изчакване</div>
+                <div class="rsi-track"><div class="rsi-marker" id="rsi-marker" style="left:50%;"></div></div>
+            </div>
+            <div class="ind-card">
+                <div class="ind-name">MACD</div>
+                <div class="ind-value" id="macd-value">--</div>
+                <div class="ind-sub" id="macd-label">хистограма</div>
+            </div>
+            <div class="ind-card">
+                <div class="ind-name">Bollinger Bands</div>
+                <div class="ind-value" id="boll-value">--</div>
+                <div class="ind-sub" id="boll-label">долна / горна</div>
+            </div>
+            <div class="ind-card">
+                <div class="ind-name">Тренд (EMA / SMA)</div>
+                <div class="ind-value" id="ema-value">--</div>
+                <div class="ind-sub" id="ema-label">--</div>
+            </div>
+            <div class="ind-card">
+                <div class="ind-name">Гласове на индикаторите</div>
+                <div class="vote-chips" id="vote-chips"><span class="vote v-hold">ИЗЧАКВАНЕ</span></div>
+                <div class="ind-sub" id="agg-signal" style="margin-top:0.6vh;">обобщен сигнал: --</div>
+            </div>
+        </section>
+
+        <section>
+            <div style="margin-bottom: 1vh; font-size: 0.9vw; color: #627893; font-weight: 700; text-transform: uppercase;">Пазарни Продукти</div>
+            <div class="products-container">
+                <div class="item-card active-card" id="card-dead-hand">
+                    <div class="item-title">Sealed Dead Hand Terminal</div>
+                    <div class="price-row">
+                        <div class="live-price" id="price-dead-hand">--- EUR</div>
+                        <div class="percent-up" id="signal-dead-hand">● CONNECTING</div>
+                    </div>
+                    <div class="action-triggers">
+                        <button class="trade-btn btn-buy" onclick="buyItem('dead-hand')">КУПИ</button>
+                        <button class="trade-btn btn-sell" onclick="sellItem('dead-hand')">ПРОДАЙ</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <div class="disclaimer">
+            ⚠️ <b>Това е учебен симулатор, не реални Steam цени.</b> Индикаторите (RSI, MACD, Bollinger) описват какво вече се е случило — те НЕ предсказват бъдещето със 100% сигурност. Никой инструмент не може. Оранжевата зона на графиката показва точно това: бъдещето е „конус“ от възможности, който се разширява, не една линия. Истинската търговия носи риск от загуба (такса 13–15%, спадащи цени, ликвидност).
+        </div>
+    </div>
+
+    <script>
+        // ── Състояние ────────────────────────────────────────────────
+        let marketPrice = 0.0;
+        let chartInstance = null;
+        let isConnected = false;
+        let hasLoggedError = false;
+
+        let wallet = parseFloat(localStorage.getItem('walletBalance')) || 50.00;
+        let inventory = JSON.parse(localStorage.getItem('userInventory')) || { "dead-hand": 0 };
+
+        const API = 'http://127.0.0.1:8080';
+
+        // ── Поллинг на живо ──────────────────────────────────────────
+        async function fetchAlgorithmTick() {
+            try {
+                let response = await fetch(`${API}/api/tick?asset=dead-hand`);
+                if (!response.ok) throw new Error(`tick ${response.status}`);
+                let data = await response.json();
+
+                marketPrice = parseFloat(data.price || 0);
+                setConnected(true);
+                updateItemCardUI(marketPrice, data.signal || "HOLD");
+                updateIndicatorsUI(data);
+                hasLoggedError = false;
+            } catch (error) {
+                setConnected(false);
+                if (!hasLoggedError) {
+                    logEvent(`⚠️ Няма връзка с двигателя на ${API}. Стартирай "./server" (Go) и презареди.`, true);
+                    hasLoggedError = true;
+                }
+            }
+            updateUI();
+            updateChartData();
         }
-    }
 
-    function renderChart(dataArray) {
-        const labels = dataArray.map((_, i) => i);
-        const real = dataArray.map(p => p.is_predict ? null : p.price);
-        const pred = dataArray.map(p => p.is_predict ? p.price : null);
+        async function updateChartData() {
+            try {
+                let response = await fetch(`${API}/api/market-data`);
+                if (!response.ok) throw new Error(`market-data ${response.status}`);
+                let data = await response.json();
+                if (!Array.isArray(data) || data.length === 0) throw new Error("празен масив");
+                renderChart(data);
+            } catch (err) {
+                // Тихо: tick хендлърът вече показва статуса на връзката.
+            }
+        }
 
-        if (!chartInstance) {
-            const ctx = document.getElementById('goMarketChart').getContext('2d');
-            chartInstance = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [
-                        { label: 'Реална цена', data: real, borderColor: '#00e5ff', tension: 0.1 },
-                        { label: 'Алгоритъм Предикт', data: pred, borderColor: '#ff3d00', borderDash: [5, 5], tension: 0.1 }
-                    ]
-                },
-                options: { responsive: true, maintainAspectRatio: false, animation: false }
+        // ── Рисуване на графиката (реална линия + прогноза + конус) ──
+        function renderChart(dataArray) {
+            const labels = [], realData = [], centerData = [], upperData = [], lowerData = [];
+
+            dataArray.forEach((point, index) => {
+                labels.push(index);
+                const price = parseFloat(point.price || 0);
+                const isPredict = point.is_predict === true;
+
+                if (!isPredict) {
+                    realData.push(price);
+                    centerData.push(null);
+                    upperData.push(null);
+                    lowerData.push(null);
+                } else {
+                    realData.push(null);
+                    centerData.push(price);
+                    upperData.push(point.upper != null ? parseFloat(point.upper) : price);
+                    lowerData.push(point.lower != null ? parseFloat(point.lower) : price);
+
+                    // Свързваме плътната и прекъснатата линия в точката на прехода
+                    const prev = dataArray[index - 1];
+                    if (index > 0 && prev && prev.is_predict !== true) {
+                        const pv = parseFloat(prev.price || 0);
+                        centerData[index - 1] = pv;
+                        upperData[index - 1] = pv;
+                        lowerData[index - 1] = pv;
+                    }
+                }
             });
-        } else {
-            chartInstance.data.labels = labels;
-            chartInstance.data.datasets[0].data = real;
-            chartInstance.data.datasets[1].data = pred;
-            chartInstance.update();
-        }
-    }
 
-    setInterval(fetchMarketData, 1000);
-</script>
+            const datasets = [
+                { label: 'Реална цена', data: realData, borderColor: '#00e5ff', borderWidth: 3, pointRadius: 0, fill: false, tension: 0.15, spanGaps: true },
+                { label: 'Прогноза', data: centerData, borderColor: '#ff3d00', borderDash: [6, 4], borderWidth: 3, pointRadius: 0, fill: false, tension: 0.15, spanGaps: true },
+                { label: 'upper', data: upperData, borderColor: 'rgba(255,61,0,0.0)', borderWidth: 0, pointRadius: 0, fill: '+1', backgroundColor: 'rgba(255,61,0,0.12)', tension: 0.15, spanGaps: true },
+                { label: 'lower', data: lowerData, borderColor: 'rgba(255,61,0,0.0)', borderWidth: 0, pointRadius: 0, fill: false, tension: 0.15, spanGaps: true }
+            ];
+
+            if (chartInstance) {
+                chartInstance.data.labels = labels;
+                chartInstance.data.datasets.forEach((ds, i) => ds.data = datasets[i].data);
+                chartInstance.update('none');
+            } else {
+                const ctx = document.getElementById('goMarketChart').getContext('2d');
+                chartInstance = new Chart(ctx, {
+                    type: 'line',
+                    data: { labels, datasets },
+                    options: {
+                        responsive: true, maintainAspectRatio: false, animation: false,
+                        scales: {
+                            x: { grid: { display: false }, ticks: { display: false } },
+                            y: { grid: { color: '#131a20' }, ticks: { color: '#888' } }
+                        },
+                        plugins: { legend: { display: false } }
+                    }
+                });
+            }
+        }
+
+        // ── Интервал / скорост ───────────────────────────────────────
+        let intervalSpeed = 500;
+        let marketInterval = setInterval(fetchAlgorithmTick, intervalSpeed);
+        document.getElementById('speed-slider').addEventListener('input', (e) => {
+            intervalSpeed = parseInt(e.target.value);
+            document.getElementById('speed-val').innerText = `${intervalSpeed}ms`;
+            clearInterval(marketInterval);
+            marketInterval = setInterval(fetchAlgorithmTick, intervalSpeed);
+        });
+
+        // ── Търговия ─────────────────────────────────────────────────
+        function buyItem(id) {
+            if (!isConnected) return;
+            if (wallet >= marketPrice) {
+                wallet -= marketPrice;
+                inventory[id] = (inventory[id] || 0) + 1;
+                logEvent(`Купихте за ${marketPrice.toFixed(2)} EUR`);
+                saveAndRefresh();
+            } else {
+                logEvent(`Недостатъчен баланс за покупка (${marketPrice.toFixed(2)} EUR).`, true);
+            }
+        }
+
+        function sellItem(id) {
+            if (!isConnected) return;
+            if (inventory[id] > 0) {
+                let fee = marketPrice * 0.1304;       // Steam такса ≈ 13.04% от обявената цена
+                let netProfit = marketPrice - fee;
+                wallet += netProfit;
+                inventory[id] -= 1;
+                logEvent(`Продадохте. Чисто (след такса): +${netProfit.toFixed(2)} EUR`);
+                saveAndRefresh();
+            } else {
+                logEvent(`Нямате този предмет в инвентара.`, true);
+            }
+        }
+
+        function saveAndRefresh() {
+            localStorage.setItem('walletBalance', wallet);
+            localStorage.setItem('userInventory', JSON.stringify(inventory));
+            updateUI();
+        }
+
+        // ── UI обновяване ─────────────────────────────────────────────
+        function updateUI() {
+            document.getElementById('wallet-display').innerText = `БАЛАНС: ${wallet.toFixed(2)} EUR`;
+            document.getElementById('inv-count-dead-hand').innerText = inventory['dead-hand'] || 0;
+        }
+
+        function updateItemCardUI(price, signal) {
+            document.getElementById('price-dead-hand').innerText = `${price.toFixed(2)} EUR`;
+            let signalEl = document.getElementById('signal-dead-hand');
+            signalEl.innerText = `● ${signal}`;
+            signalEl.className = signal === "BUY" ? "percent-up" : (signal === "SELL" ? "percent-down" : "");
+            if (signal === "HOLD") signalEl.style.color = "#92a7bd";
+        }
+
+        function voteClass(v) { return v === "BUY" ? "v-buy" : (v === "SELL" ? "v-sell" : "v-hold"); }
+
+        function updateIndicatorsUI(d) {
+            // RSI
+            const rsi = parseFloat(d.rsi || 50);
+            document.getElementById('rsi-value').innerText = rsi.toFixed(1);
+            const marker = document.getElementById('rsi-marker');
+            marker.style.left = Math.max(0, Math.min(100, rsi)) + '%';
+            const rsiLabel = document.getElementById('rsi-label');
+            if (rsi >= 70) { rsiLabel.innerText = "свръхкупен (>70)"; rsiLabel.style.color = "#ff3366"; }
+            else if (rsi <= 30) { rsiLabel.innerText = "свръхпродаден (<30)"; rsiLabel.style.color = "#00ff88"; }
+            else { rsiLabel.innerText = "неутрален (30–70)"; rsiLabel.style.color = "#7d93ad"; }
+
+            // MACD
+            const hist = parseFloat(d.macd_hist || 0);
+            const macdEl = document.getElementById('macd-value');
+            macdEl.innerText = hist.toFixed(4);
+            macdEl.style.color = hist > 0 ? "#00ff88" : (hist < 0 ? "#ff3366" : "#ffffff");
+            document.getElementById('macd-label').innerText = hist > 0 ? "възходящ импулс" : (hist < 0 ? "низходящ импулс" : "неутрален");
+
+            // Bollinger
+            document.getElementById('boll-value').innerText = `${(+d.boll_lower).toFixed(2)} – ${(+d.boll_upper).toFixed(2)}`;
+            const px = parseFloat(d.price || 0);
+            const bl = document.getElementById('boll-label');
+            if (px > d.boll_upper) { bl.innerText = "цената е над горната лента"; bl.style.color = "#ff3366"; }
+            else if (px < d.boll_lower) { bl.innerText = "цената е под долната лента"; bl.style.color = "#00ff88"; }
+            else { bl.innerText = "в рамките на лентите"; bl.style.color = "#7d93ad"; }
+
+            // EMA / SMA trend
+            document.getElementById('ema-value').innerText = `${(+d.ema).toFixed(2)} EUR`;
+            const emaLbl = document.getElementById('ema-label');
+            emaLbl.innerText = `SMA: ${(+d.sma).toFixed(2)} · ${px >= d.ema ? "цена над EMA ↑" : "цена под EMA ↓"}`;
+
+            // Votes
+            const votes = d.votes || {};
+            const order = ["RSI", "MACD", "BOLL", "TREND"];
+            document.getElementById('vote-chips').innerHTML = order
+                .filter(k => votes[k])
+                .map(k => `<span class="vote ${voteClass(votes[k])}">${k}: ${votes[k]}</span>`)
+                .join('');
+            document.getElementById('agg-signal').innerText = `обобщен сигнал: ${d.signal || '--'}`;
+        }
+
+        function setConnected(state) {
+            isConnected = state;
+            const el = document.getElementById('conn-status');
+            if (state) { el.innerText = "● НА ЖИВО"; el.style.color = "#00ff88"; }
+            else { el.innerText = "● ИЗКЛЮЧЕН"; el.style.color = "#ff3366"; }
+        }
+
+        function logEvent(message, isError = false) {
+            const feed = document.getElementById('log-feed');
+            const color = isError ? '#ff3366' : '#00ff88';
+            feed.innerHTML += `<div style="color: ${color}">[${new Date().toLocaleTimeString()}] ${message}</div>`;
+            feed.scrollTop = feed.scrollHeight;
+        }
+
+        function resetGame() {
+            localStorage.clear(); wallet = 50.00; inventory = { "dead-hand": 0 };
+            logEvent("[SYSTEM] Прогресът беше нулиран!"); saveAndRefresh();
+        }
+
+        window.addEventListener('load', () => { updateUI(); fetchAlgorithmTick(); });
+    </script>
 </body>
 </html>
