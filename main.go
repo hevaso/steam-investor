@@ -418,7 +418,14 @@ func recomputeAsset(a *Asset) {
 		Votes:    votes,
 		Note:     note,
 	}
-	a.prediction = buildForecast(prices, forecastLen)
+	steps := int(math.Round(float64(len(prices)) * 0.25))
+	if steps < 2 {
+		steps = 2
+	}
+	if steps > forecastLen {
+		steps = forecastLen
+	}
+	a.prediction = buildForecast(prices, steps)
 }
 
 func sma(prices []float64, period int) float64 {
@@ -659,12 +666,8 @@ func handleMarketData(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	a := getAsset(r)
 	a.mu.RLock()
-	out := make([]ChartPoint, 0, len(a.history)+len(a.prediction)+1)
+	out := make([]ChartPoint, 0, len(a.history)+len(a.prediction))
 	out = append(out, a.history...)
-	if len(a.history) > 0 && len(a.prediction) > 0 {
-		last := a.history[len(a.history)-1].Price
-		out = append(out, ChartPoint{Price: last, IsPredict: true, Upper: &last, Lower: &last})
-	}
 	out = append(out, a.prediction...)
 	a.mu.RUnlock()
 	json.NewEncoder(w).Encode(out)
