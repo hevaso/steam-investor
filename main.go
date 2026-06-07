@@ -499,6 +499,9 @@ func rsi(prices []float64, period int) float64 {
 		avgLoss = (avgLoss*float64(period-1) + l) / float64(period)
 	}
 	if avgLoss == 0 {
+		if avgGain == 0 {
+			return 50.0
+		}
 		return 100.0
 	}
 	rs := avgGain / avgLoss
