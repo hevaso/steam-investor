@@ -51,6 +51,7 @@ type TickResponse struct {
 	Price    float64           `json:"price"`
 	Signal   string            `json:"signal"`
 	Mode     string            `json:"mode"`
+	Live     bool              `json:"live"`
 	Rsi      float64           `json:"rsi"`
 	Sma      float64           `json:"sma"`
 	Ema      float64           `json:"ema"`
@@ -79,6 +80,7 @@ type Asset struct {
 	history    []ChartPoint
 	prediction []ChartPoint
 	snapshot   TickResponse
+	gotReal    bool
 }
 
 var (
@@ -212,6 +214,7 @@ func seedAssetFromSteam(a *Asset) {
 		a.mu.Lock()
 		a.history = points
 		a.price = newPrice
+		a.gotReal = true
 		recomputeAsset(a)
 		a.mu.Unlock()
 	}
@@ -338,6 +341,7 @@ func runRealEngine() {
 				if len(a.history) > maxHistory {
 					a.history = a.history[len(a.history)-maxHistory:]
 				}
+				a.gotReal = true
 				recomputeAsset(a)
 				a.mu.Unlock()
 			}
@@ -406,6 +410,7 @@ func recomputeAsset(a *Asset) {
 		Price:    round2(a.price),
 		Signal:   signal,
 		Mode:     mode,
+		Live:     useRealSteam && a.gotReal,
 		Rsi:      round2(rsiV),
 		Sma:      round2(smaV),
 		Ema:      round2(emaV),
