@@ -999,10 +999,10 @@
             });
 
             const datasets = [
-                { label: 'Реална цена', data: realData, borderColor: '#00e5ff', borderWidth: 3, pointRadius: 0, fill: false, tension: 0.15, spanGaps: true },
-                { label: 'Прогноза', data: centerData, borderColor: '#ff3d00', borderDash: [6, 4], borderWidth: 3, pointRadius: 0, fill: false, tension: 0.15, spanGaps: true },
-                { label: 'upper', data: upperData, borderColor: 'rgba(255,61,0,0.0)', borderWidth: 0, pointRadius: 0, fill: '+1', backgroundColor: 'rgba(255,61,0,0.12)', tension: 0.15, spanGaps: true },
-                { label: 'lower', data: lowerData, borderColor: 'rgba(255,61,0,0.0)', borderWidth: 0, pointRadius: 0, fill: false, tension: 0.15, spanGaps: true }
+                { label: 'Реална цена', data: realData, borderColor: '#00e5ff', borderWidth: 3, pointRadius: 0, fill: false, tension: 0, spanGaps: true },
+                { label: 'Прогноза', data: centerData, borderColor: '#ff3d00', borderDash: [6, 4], borderWidth: 3, pointRadius: 0, fill: false, tension: 0, spanGaps: true },
+                { label: 'upper', data: upperData, borderColor: 'rgba(255,61,0,0.0)', borderWidth: 0, pointRadius: 0, fill: '+1', backgroundColor: 'rgba(255,61,0,0.12)', tension: 0, spanGaps: true },
+                { label: 'lower', data: lowerData, borderColor: 'rgba(255,61,0,0.0)', borderWidth: 0, pointRadius: 0, fill: false, tension: 0, spanGaps: true }
             ];
 
             if (chartInstance) {
