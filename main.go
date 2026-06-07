@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,13 +17,26 @@ import (
 )
 
 const (
-	useRealSteam  = true
-	steamAppID    = "730"
-	steamItemName = "G18BD283004"
-	steamCurrency = "3"
-	steamPollSec  = 30
-	simStartPrice = 1.50
+	useRealSteam     = true
+	steamAppID       = "730"
+	steamCurrency    = "3"
+	steamPollSec     = 30
+	steamLoginSecure = ""
+	simStartPrice    = 1.50
+	maxHistory       = 90
+	forecastLen      = 8
+	simTick          = 3000 * time.Millisecond
 )
+
+var itemConfig = []struct {
+	ID, Name, HashName string
+	SimBase            float64
+}{
+	{"dead-hand", "Sealed Dead Hand Terminal", "G18BD283004", 1.50},
+	{"kilowatt", "Kilowatt Case", "Kilowatt Case", 0.90},
+	{"revolution", "Revolution Case", "Revolution Case", 0.35},
+	{"dreams", "Dreams & Nightmares Case", "Dreams & Nightmares Case", 1.30},
+}
 
 type ChartPoint struct {
 	Price     float64  `json:"price"`
@@ -32,6 +46,8 @@ type ChartPoint struct {
 }
 
 type TickResponse struct {
+	ID       string            `json:"id"`
+	Name     string            `json:"name"`
 	Price    float64           `json:"price"`
 	Signal   string            `json:"signal"`
 	Mode     string            `json:"mode"`
@@ -48,65 +64,157 @@ type TickResponse struct {
 	Note     string            `json:"note"`
 }
 
-var (
-	history      []ChartPoint
-	prediction   []ChartPoint
-	snapshot     TickResponse
-	mu           sync.Mutex
-	currentPrice float64 = simStartPrice
-	basePrice    float64 = simStartPrice
-)
-
-const (
-	maxHistory  = 90
-	forecastLen = 8
-	simTick     = 3000 * time.Millisecond
-)
-
-func setupCORS(w *http.ResponseWriter, r *http.Request) bool {
-	(*w).Header().Set("Access-Control-Allow-Origin", "*")
-	(*w).Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	(*w).Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-	if r.Method == "OPTIONS" {
-		(*w).WriteHeader(http.StatusOK)
-		return true
-	}
-	return false
+type ItemInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
+
+type Asset struct {
+	ID         string
+	Name       string
+	HashName   string
+	simBase    float64
+	mu         sync.RWMutex
+	price      float64
+	history    []ChartPoint
+	prediction []ChartPoint
+	snapshot   TickResponse
+}
+
+var (
+	assets = map[string]*Asset{}
+	order  []string
+)
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
-	if useRealSteam {
-		fmt.Println("[SYSTEM] РЕАЛЕН режим: теглене на цена от Steam за", steamItemName)
-		price, lowest, median, vol, err := fetchSteamPrice()
-		if err != nil {
-			fmt.Println("[STEAM] ВНИМАНИЕ: началната заявка се провали:", err)
-			fmt.Println("[STEAM] Провери steamItemName (частта от URL след /730/) и че имаш интернет.")
-		} else if price > 0 {
-			currentPrice = price
-			basePrice = price
-			history = append(history, ChartPoint{Price: round2(price), IsPredict: false})
-			fmt.Printf("[STEAM] OK -> цена=%.2f EUR (lowest=%.2f median=%.2f) обем=%s\n", price, lowest, median, vol)
-		} else {
-			fmt.Println("[STEAM] ВНИМАНИЕ: Steam не върна цена (нито lowest, нито median).")
+
+	for _, c := range itemConfig {
+		base := c.SimBase
+		if base <= 0 {
+			base = simStartPrice
 		}
+		a := &Asset{
+			ID:       c.ID,
+			Name:     c.Name,
+			HashName: c.HashName,
+			simBase:  base,
+			price:    base,
+		}
+		a.history = append(a.history, ChartPoint{Price: round2(base)})
+		recomputeAsset(a)
+		assets[c.ID] = a
+		order = append(order, c.ID)
+	}
+
+	if useRealSteam {
+		fmt.Println("[SYSTEM] РЕАЛЕН режим. Зареждане на цени от Steam...")
+		if steamLoginSecure == "" {
+			fmt.Println("[SYSTEM] Без login cookie: 1 точка/артикул в началото, трупам на живо. Индикаторите ще са неутрални, докато се натрупат данни.")
+		}
+		go func() {
+			for _, id := range order {
+				seedAssetFromSteam(assets[id])
+				time.Sleep(1500 * time.Millisecond)
+			}
+		}()
 		go runRealEngine()
 	} else {
 		fmt.Println("[SYSTEM] СИМУЛАЦИОНЕН режим (изкуствени данни).")
-		generateInitialHistory(60)
+		for _, id := range order {
+			a := assets[id]
+			generateInitialHistory(a, 60)
+			recomputeAsset(a)
+		}
 		go runMarketEngine()
 	}
-	recompute()
-	http.HandleFunc("/api/market-data", handleMarketData)
-	http.HandleFunc("/api/tick", handleTick)
-	http.HandleFunc("/api/trade", handleTrade)
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-    	http.ServeFile(w, r, "index.html")
-	})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", wrap(handleStatic))
+	mux.HandleFunc("/api/items", wrap(handleItems))
+	mux.HandleFunc("/api/all-ticks", wrap(handleAllTicks))
+	mux.HandleFunc("/api/tick", wrap(handleTick))
+	mux.HandleFunc("/api/market-data", wrap(handleMarketData))
+	mux.HandleFunc("/api/trade", wrap(handleTrade))
 
-	log.Fatal(http.ListenAndServe(":8080", nil))
-	fmt.Println("[SYSTEM] Сървърът е пуснат успешно на :8080")
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      mux,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 20 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+	fmt.Println("[SYSTEM] Сървърът е пуснат успешно на порт " + port)
+	log.Fatal(srv.ListenAndServe())
+}
+
+func wrap(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("[RECOVER] заявка %s предизвика паника: %v", r.URL.Path, rec)
+				http.Error(w, "internal error", http.StatusInternalServerError)
+			}
+		}()
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		h(w, r)
+	}
+}
+
+func handleStatic(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+		http.ServeFile(w, r, "index.html")
+		return
+	}
+	http.NotFound(w, r)
+}
+
+func seedAssetFromSteam(a *Asset) {
+	var points []ChartPoint
+	var newPrice float64
+
+	if steamLoginSecure != "" {
+		hist, err := fetchSteamHistory(a.HashName)
+		if err == nil && len(hist) >= 5 {
+			points = make([]ChartPoint, 0, len(hist))
+			for _, pr := range hist {
+				points = append(points, ChartPoint{Price: pr})
+			}
+			newPrice = hist[len(hist)-1]
+			fmt.Printf("[STEAM] %s -> история: %d точки (последна %.2f EUR)\n", a.Name, len(hist), newPrice)
+		} else if err != nil {
+			fmt.Printf("[STEAM] %s -> история неуспешна (%v); пробвам текуща цена\n", a.Name, err)
+		}
+	}
+
+	if len(points) == 0 {
+		price, lowest, median, vol, err := fetchSteamPrice(a.HashName)
+		if err != nil {
+			fmt.Printf("[STEAM] %s -> ГРЕШКА: %v\n", a.Name, err)
+		} else if price > 0 {
+			newPrice = price
+			points = append(points, ChartPoint{Price: round2(price)})
+			fmt.Printf("[STEAM] %s -> %.2f EUR (lowest=%.2f median=%.2f обем=%s)\n", a.Name, price, lowest, median, vol)
+		}
+	}
+
+	if len(points) > 0 {
+		a.mu.Lock()
+		a.history = points
+		a.price = newPrice
+		recomputeAsset(a)
+		a.mu.Unlock()
+	}
 }
 
 func choosePrice(lowest, median float64) float64 {
@@ -116,9 +224,9 @@ func choosePrice(lowest, median float64) float64 {
 	return median
 }
 
-func fetchSteamPrice() (price, lowest, median float64, volume string, err error) {
+func fetchSteamPrice(hashName string) (price, lowest, median float64, volume string, err error) {
 	endpoint := fmt.Sprintf("https://steamcommunity.com/market/priceoverview/?appid=%s&currency=%s&market_hash_name=%s",
-		steamAppID, steamCurrency, url.QueryEscape(steamItemName))
+		steamAppID, steamCurrency, url.QueryEscape(hashName))
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, _ := http.NewRequest("GET", endpoint, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0")
@@ -129,7 +237,7 @@ func fetchSteamPrice() (price, lowest, median float64, volume string, err error)
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		return 0, 0, 0, "", fmt.Errorf("steam HTTP %d (вероятно rate-limit, изчакай малко)", resp.StatusCode)
+		return 0, 0, 0, "", fmt.Errorf("HTTP %d (вероятно rate-limit)", resp.StatusCode)
 	}
 	var sp struct {
 		Success     bool   `json:"success"`
@@ -146,6 +254,46 @@ func fetchSteamPrice() (price, lowest, median float64, volume string, err error)
 	lowest = parsePrice(sp.LowestPrice)
 	median = parsePrice(sp.MedianPrice)
 	return choosePrice(lowest, median), lowest, median, sp.Volume, nil
+}
+
+func fetchSteamHistory(hashName string) ([]float64, error) {
+	endpoint := fmt.Sprintf("https://steamcommunity.com/market/pricehistory/?appid=%s&currency=%s&market_hash_name=%s",
+		steamAppID, steamCurrency, url.QueryEscape(hashName))
+	client := &http.Client{Timeout: 12 * time.Second}
+	req, _ := http.NewRequest("GET", endpoint, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Header.Set("Cookie", "steamLoginSecure="+steamLoginSecure)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d (cookie невалиден/изтекъл или rate-limit)", resp.StatusCode)
+	}
+	var ph struct {
+		Success bool            `json:"success"`
+		Prices  [][]interface{} `json:"prices"`
+	}
+	if err := json.Unmarshal(body, &ph); err != nil {
+		return nil, fmt.Errorf("невалиден отговор (cookie?)")
+	}
+	if !ph.Success {
+		return nil, fmt.Errorf("success=false (cookie невалиден/изтекъл?)")
+	}
+	out := make([]float64, 0, len(ph.Prices))
+	for _, p := range ph.Prices {
+		if len(p) >= 2 {
+			if f, ok := p[1].(float64); ok {
+				out = append(out, round2(f))
+			}
+		}
+	}
+	if len(out) > maxHistory {
+		out = out[len(out)-maxHistory:]
+	}
+	return out, nil
 }
 
 func parsePrice(s string) float64 {
@@ -173,22 +321,27 @@ func parsePrice(s string) float64 {
 }
 
 func runRealEngine() {
+	per := time.Duration(steamPollSec) * time.Second / time.Duration(len(order))
+	if per < 5*time.Second {
+		per = 5 * time.Second
+	}
 	for {
-		time.Sleep(time.Duration(steamPollSec) * time.Second)
-		price, _, _, _, err := fetchSteamPrice()
-		if err != nil {
-			fmt.Println("[STEAM] Грешка при заявка:", err)
-			continue
-		}
-		if price > 0 {
-			mu.Lock()
-			currentPrice = price
-			history = append(history, ChartPoint{Price: round2(price), IsPredict: false})
-			if len(history) > maxHistory {
-				history = history[len(history)-maxHistory:]
+		for _, id := range order {
+			a := assets[id]
+			price, _, _, _, err := fetchSteamPrice(a.HashName)
+			if err != nil {
+				fmt.Printf("[STEAM] %s: %v\n", a.Name, err)
+			} else if price > 0 {
+				a.mu.Lock()
+				a.price = price
+				a.history = append(a.history, ChartPoint{Price: round2(price)})
+				if len(a.history) > maxHistory {
+					a.history = a.history[len(a.history)-maxHistory:]
+				}
+				recomputeAsset(a)
+				a.mu.Unlock()
 			}
-			recompute()
-			mu.Unlock()
+			time.Sleep(per)
 		}
 	}
 }
@@ -198,56 +351,59 @@ func runMarketEngine() {
 	defer ticker.Stop()
 	for {
 		<-ticker.C
-		mu.Lock()
-		stepPrice()
-		recompute()
-		mu.Unlock()
-	}
-}
-
-func stepPrice() {
-	reversion := (basePrice - currentPrice) * 0.02
-	noise := (rand.Float64() * 0.12) - 0.06
-	currentPrice += reversion + noise
-	if currentPrice < 0.20 {
-		currentPrice = 0.20
-	}
-	history = append(history, ChartPoint{Price: round2(currentPrice), IsPredict: false})
-	if len(history) > maxHistory {
-		history = history[len(history)-maxHistory:]
-	}
-}
-
-func generateInitialHistory(points int) {
-	mu.Lock()
-	defer mu.Unlock()
-	for i := 0; i < points; i++ {
-		reversion := (basePrice - currentPrice) * 0.02
-		noise := (rand.Float64() * 0.10) - 0.05
-		currentPrice += reversion + noise
-		if currentPrice < 0.20 {
-			currentPrice = 0.20
+		for _, id := range order {
+			a := assets[id]
+			a.mu.Lock()
+			stepPrice(a)
+			recomputeAsset(a)
+			a.mu.Unlock()
 		}
-		history = append(history, ChartPoint{Price: round2(currentPrice), IsPredict: false})
 	}
 }
 
-func recompute() {
-	prices := realPrices()
+func stepPrice(a *Asset) {
+	reversion := (a.simBase - a.price) * 0.02
+	noise := (rand.Float64() * 0.12) - 0.06
+	a.price += reversion + noise
+	if a.price < 0.05 {
+		a.price = 0.05
+	}
+	a.history = append(a.history, ChartPoint{Price: round2(a.price)})
+	if len(a.history) > maxHistory {
+		a.history = a.history[len(a.history)-maxHistory:]
+	}
+}
+
+func generateInitialHistory(a *Asset, points int) {
+	for i := 0; i < points; i++ {
+		reversion := (a.simBase - a.price) * 0.02
+		noise := (rand.Float64() * 0.10) - 0.05
+		a.price += reversion + noise
+		if a.price < 0.05 {
+			a.price = 0.05
+		}
+		a.history = append(a.history, ChartPoint{Price: round2(a.price)})
+	}
+}
+
+func recomputeAsset(a *Asset) {
+	prices := pricesOf(a.history)
 	rsiV := rsi(prices, 14)
 	smaV := sma(prices, 20)
 	emaV := lastF(emaSeries(prices, 20))
 	macdLine, macdSig, macdHist := macd(prices)
 	bMid, bUp, bLow := bollinger(prices, 20, 2.0)
-	votes, signal := decideSignal(round2(currentPrice), rsiV, macdHist, bLow, bUp, emaV)
+	votes, signal := decideSignal(round2(a.price), rsiV, macdHist, bLow, bUp, emaV)
 	mode := "sim"
 	note := "Симулирана среда (изкуствени данни). Индикаторите описват миналото; не предсказват бъдещето."
 	if useRealSteam {
 		mode = "real"
-		note = "Реална цена от Steam, обновявана периодично. Индикаторите се нуждаят от достатъчно реални точки."
+		note = "Реална цена от Steam. Индикаторите се нуждаят от достатъчно реални точки, за да са смислени."
 	}
-	snapshot = TickResponse{
-		Price:    round2(currentPrice),
+	a.snapshot = TickResponse{
+		ID:       a.ID,
+		Name:     a.Name,
+		Price:    round2(a.price),
 		Signal:   signal,
 		Mode:     mode,
 		Rsi:      round2(rsiV),
@@ -262,7 +418,7 @@ func recompute() {
 		Votes:    votes,
 		Note:     note,
 	}
-	prediction = buildForecast(prices, forecastLen)
+	a.prediction = buildForecast(prices, forecastLen)
 }
 
 func sma(prices []float64, period int) float64 {
@@ -447,75 +603,98 @@ func buildForecast(prices []float64, steps int) []ChartPoint {
 	for i := 1; i <= steps; i++ {
 		revert := (mid - p) * 0.15
 		p = p + slope*0.6 + revert
-		if p < 0.20 {
-			p = 0.20
+		if p < 0.02 {
+			p = 0.02
 		}
 		band := vol * math.Sqrt(float64(i))
 		up := round2(p + band)
 		lo := round2(p - band)
-		if lo < 0.05 {
-			lo = 0.05
+		if lo < 0.02 {
+			lo = 0.02
 		}
 		out = append(out, ChartPoint{Price: round2(p), IsPredict: true, Upper: &up, Lower: &lo})
 	}
 	return out
 }
 
-func handleTick(w http.ResponseWriter, r *http.Request) {
-	if setupCORS(&w, r) {
-		return
+func getAsset(r *http.Request) *Asset {
+	id := r.URL.Query().Get("asset")
+	if a, ok := assets[id]; ok {
+		return a
 	}
+	return assets[order[0]]
+}
+
+func handleItems(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	mu.Lock()
-	resp := snapshot
-	mu.Unlock()
+	list := make([]ItemInfo, 0, len(order))
+	for _, id := range order {
+		list = append(list, ItemInfo{ID: assets[id].ID, Name: assets[id].Name})
+	}
+	json.NewEncoder(w).Encode(list)
+}
+
+func handleAllTicks(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	out := make([]TickResponse, 0, len(order))
+	for _, id := range order {
+		a := assets[id]
+		a.mu.RLock()
+		out = append(out, a.snapshot)
+		a.mu.RUnlock()
+	}
+	json.NewEncoder(w).Encode(out)
+}
+
+func handleTick(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	a := getAsset(r)
+	a.mu.RLock()
+	resp := a.snapshot
+	a.mu.RUnlock()
 	json.NewEncoder(w).Encode(resp)
 }
 
 func handleMarketData(w http.ResponseWriter, r *http.Request) {
-	if setupCORS(&w, r) {
-		return
-	}
 	w.Header().Set("Content-Type", "application/json")
-	mu.Lock()
-	out := make([]ChartPoint, 0, len(history)+len(prediction)+1)
-	out = append(out, history...)
-	if len(history) > 0 && len(prediction) > 0 {
-		last := history[len(history)-1].Price
+	a := getAsset(r)
+	a.mu.RLock()
+	out := make([]ChartPoint, 0, len(a.history)+len(a.prediction)+1)
+	out = append(out, a.history...)
+	if len(a.history) > 0 && len(a.prediction) > 0 {
+		last := a.history[len(a.history)-1].Price
 		out = append(out, ChartPoint{Price: last, IsPredict: true, Upper: &last, Lower: &last})
 	}
-	out = append(out, prediction...)
-	mu.Unlock()
+	out = append(out, a.prediction...)
+	a.mu.RUnlock()
 	json.NewEncoder(w).Encode(out)
 }
 
 func handleTrade(w http.ResponseWriter, r *http.Request) {
-	if setupCORS(&w, r) {
-		return
-	}
 	w.Header().Set("Content-Type", "application/json")
+	a := getAsset(r)
 	action := r.URL.Query().Get("action")
-	mu.Lock()
+	a.mu.Lock()
 	if !useRealSteam {
 		switch action {
 		case "buy":
-			currentPrice += currentPrice * 0.004
+			a.price += a.price * 0.004
 		case "sell":
-			currentPrice -= currentPrice * 0.004
+			a.price -= a.price * 0.004
 		}
-		if currentPrice < 0.20 {
-			currentPrice = 0.20
+		if a.price < 0.05 {
+			a.price = 0.05
 		}
-		recompute()
+		recomputeAsset(a)
 	}
-	resp := snapshot
-	mu.Unlock()
+	resp := a.snapshot
+	a.mu.Unlock()
 	json.NewEncoder(w).Encode(resp)
 }
 
-func realPrices() []float64 {
-	out := make([]float64, len(history))
-	for i, p := range history {
+func pricesOf(h []ChartPoint) []float64 {
+	out := make([]float64, len(h))
+	for i, p := range h {
 		out[i] = p.Price
 	}
 	return out
