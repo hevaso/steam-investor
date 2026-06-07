@@ -1005,9 +1005,29 @@
                 { label: 'lower', data: lowerData, borderColor: 'rgba(255,61,0,0.0)', borderWidth: 0, pointRadius: 0, fill: false, tension: 0, spanGaps: true }
             ];
 
+            const allVals = [];
+            realData.forEach(v => { if (v != null) allVals.push(v); });
+            upperData.forEach(v => { if (v != null) allVals.push(v); });
+            lowerData.forEach(v => { if (v != null) allVals.push(v); });
+            let yMin, yMax;
+            if (allVals.length) {
+                const lo = Math.min(...allVals);
+                const hi = Math.max(...allVals);
+                const mid = (lo + hi) / 2;
+                const minSpan = Math.max(mid * 0.15, 0.05);
+                const span = Math.max(hi - lo, minSpan) * 1.15;
+                yMin = mid - span / 2;
+                yMax = mid + span / 2;
+                if (yMin < 0) yMin = 0;
+            }
+
             if (chartInstance) {
                 chartInstance.data.labels = labels;
                 chartInstance.data.datasets.forEach((ds, i) => ds.data = datasets[i].data);
+                if (yMin != null) {
+                    chartInstance.options.scales.y.min = yMin;
+                    chartInstance.options.scales.y.max = yMax;
+                }
                 chartInstance.update('none');
             } else {
                 const ctx = document.getElementById('goMarketChart').getContext('2d');
@@ -1020,7 +1040,7 @@
                         animation: false,
                         scales: {
                             x: { grid: { display: false }, ticks: { display: false } },
-                            y: { grid: { color: '#131a20' }, ticks: { color: '#888' } }
+                            y: { min: yMin, max: yMax, grid: { color: '#131a20' }, ticks: { color: '#888' } }
                         },
                         plugins: { legend: { display: false } }
                     }
