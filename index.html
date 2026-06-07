@@ -737,7 +737,7 @@
                                 = „презакупен“ (скочила е бързо), под 30 = „препродаден“ (паднала е рязко).</span>
                             <i>Как се използва</i><span>Гледай за покупка близо до 30 и внимавай близо до 70. Нов връх в
                                 цената без нов връх в RSI = отслабващ сигнал (възможен обрат).</span>
-                            <i>Кога е най-добре</i><span>При пазар, който се движи настрани - за хващане на дъна и
+                            <i>Кога е най-добре</i><span>При пазар, който се движи настрани — за хващане на дъна и
                                 върхове. По-малко надежден при силен тренд.</span>
                         </span></span></div>
                 <div class="ind-value" id="rsi-value">--</div>
@@ -873,10 +873,11 @@
         <div class="bottom-row">
             <div class="disclaimer" id="disclaimer">Свързване с двигателя…</div>
             <div class="tax-warning">
-                <b>⚠ Steam такса ~13% при ПРОДАЖБА</b>
-                <p>Когато ПРОДАВАШ, Steam удържа ~<span class="x">13%</span> (5% Steam + ~10% за CS2). Продаваш за 1.00€ →
-                    получаваш само ~<span class="x">0.87€</span>. Цената трябва да се качи с поне
-                    <span class="x">~15%</span>, само за да си върнеш парите.</p>
+                <b>⚠ Steam такса 15% при ПРОДАЖБА</b>
+                <p>Steam удържа общо <span class="x">15%</span> при продажба: <span class="x">5%</span> за Steam +
+                    <span class="x">10%</span> такса за играта (при CS2 и двете отиват във Valve, затова изглежда
+                    „скрита“). Показаната цена е за КУПУВАЧА — ти получаваш ~<span class="x">87%</span> от нея.
+                    Пример: 1.00€ → в портфейла влизат ~<span class="x">0.87€</span>.</p>
             </div>
         </div>
     </div>
@@ -899,6 +900,7 @@
         let chartInstance = null;
         let isConnected = false;
         let hasLoggedError = false;
+        let failStreak = 0;
         const assetPrices = { 'dead-hand': 0, 'kilowatt': 0, 'revolution': 0, 'dreams': 0 };
         const snapshots = {};
 
@@ -914,6 +916,7 @@
                 if (!r.ok) throw new Error('all-ticks ' + r.status);
                 const all = await r.json();
                 setConnected(true);
+                failStreak = 0;
                 all.forEach(d => {
                     assetPrices[d.id] = d.price;
                     snapshots[d.id] = d;
@@ -926,10 +929,19 @@
                 hasLoggedError = false;
                 await updateChartData();
             } catch (e) {
-                setConnected(false);
-                if (!hasLoggedError) {
-                    logEvent(`⚠️ Няма връзка с двигателя на ${API || location.origin}. Стартирай "go run main.go" и презареди.`, true);
-                    hasLoggedError = true;
+                failStreak++;
+                isConnected = false;
+                const el = document.getElementById('conn-status');
+                if (failStreak < 3) {
+                    el.innerText = "● Свързване...";
+                    el.style.color = "#e0b54a";
+                } else {
+                    el.innerText = "● ИЗКЛЮЧЕН";
+                    el.style.color = "#ff3366";
+                    if (!hasLoggedError) {
+                        logEvent('Няма връзка със сървъра. Изчакай малко и презареди страницата.', true);
+                        hasLoggedError = true;
+                    }
                 }
             }
             updateUI();
@@ -1121,18 +1133,22 @@
                 .map(k => `<span class="vote ${voteClass(votes[k])}">${k}: ${votes[k]}</span>`)
                 .join('');
             document.getElementById('agg-signal').innerText = `обобщен сигнал: ${d.signal || '--'}`;
-            applyMode(d.mode || 'sim');
+            applyMode(d.mode || 'sim', d.live === true);
         }
 
         let lastMode = null;
-        function applyMode(mode) {
-            if (mode === lastMode) return;
-            lastMode = mode;
+        function applyMode(mode, live) {
+            const state = mode === 'real' ? (live ? 'real-live' : 'real-nodata') : 'sim';
+            if (state === lastMode) return;
+            lastMode = state;
             const disc = document.getElementById('disclaimer');
             const legend = document.getElementById('legend-real');
-            if (mode === 'real') {
+            if (state === 'real-live') {
                 if (legend) legend.innerHTML = '● Реална Steam цена';
                 disc.innerHTML = '✅ <b>Реален режим:</b> цените идват от Steam за всеки артикул. Има ДВА таймера: (1) плъзгачът „Скорост\u201C горе само опреснява екрана от локалния ти сървър — безопасен е на всяка стойност (3–10 сек) и НЕ пипа Steam; (2) сървърът пита Steam периодично (steamPollSec в main.go) — само този интервал е ограничен от Steam. Индикаторите (RSI, MACD, Bollinger) стават смислени само след достатъчно реални точки; прогнозата (оранжево) е само догадка, не е сигурна.';
+            } else if (state === 'real-nodata') {
+                if (legend) legend.innerHTML = '● Примерна цена (няма Steam)';
+                disc.innerHTML = '⚠️ <b>В момента няма връзка със Steam — показаните числа са начални/примерни, НЕ реални цени.</b> Това често се случва при хостинг в облак (напр. Railway), защото Steam блокира заявки от такива сървъри. Щом сървърът успее да изтегли цени, всичко ще се обнови автоматично. Дотогава не приемай числата за истински.';
             } else {
                 if (legend) legend.innerHTML = '● Симулирана цена';
                 disc.innerHTML = '⚠️ <b>Учебен симулатор — изкуствени данни, не реални Steam цени.</b> Числата са измислени от програмата. Индикаторите описват миналото; не предсказват бъдещето със 100% сигурност. Оранжевата зона е „конус“ от възможности, не една линия.';
@@ -1164,6 +1180,8 @@
         window.addEventListener('load', () => {
             selectAsset('dead-hand');
             tickAll();
+            setTimeout(() => { if (!isConnected) tickAll(); }, 1500);
+            setTimeout(() => { if (!isConnected) tickAll(); }, 3000);
         });
     </script>
 </body>
